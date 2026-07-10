@@ -1,0 +1,13 @@
+{
+  "name": "System 777",
+  "short_name": "System 777",
+  "description": "El bot de Discord más completo para tu servidor",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#04040c",
+  "theme_color": "#5865F2",
+  "icons": [
+    { "src": "/avatar.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/avatar.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
