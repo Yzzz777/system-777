@@ -119,37 +119,12 @@ module.exports = {
 
     // ── setup ───────────────────────────────────────────────────────────────
     if (sub === 'setup') {
-      const panelCh  = interaction.options.getChannel('panel-canal');
-      const roleSup  = interaction.options.getRole('rol-soporte');
-      const logCh    = interaction.options.getChannel('log-canal');
-      const catDiscId= interaction.options.getString('categoria-discord');
-
-      cfg.panelChannel  = panelCh.id;
-      cfg.supportRole   = roleSup.id;
-      if (logCh)     cfg.logChannel     = logCh.id;
-      if (catDiscId) cfg.ticketCategory = catDiscId;
-      if (!cfg.categories) cfg.categories = [];
-
-      db.set('ticketConfig', interaction.guild.id, cfg);
-
-      // Enviar panel
-      const panel = tkt.buildPanel(cfg, interaction.guild);
-      const msg   = await panelCh.send(panel);
-      cfg.panelMessageId = msg.id;
-      db.set('ticketConfig', interaction.guild.id, cfg);
-
       return interaction.reply({
         embeds: [new EmbedBuilder()
-          .setColor(0x00FF88)
-          .setTitle('✅ Sistema de Tickets Configurado')
-          .addFields(
-            { name: '📌 Panel',       value: `${panelCh}`,                                              inline: true },
-            { name: '🛡️ Rol soporte', value: `${roleSup}`,                                             inline: true },
-            { name: '📋 Logs',        value: logCh ? `${logCh}` : '❌ Sin configurar',                 inline: true },
-            { name: '📂 Categorías',  value: cfg.categories.length ? `${cfg.categories.length} tipo(s)` : '0 (botón simple)', inline: true },
-          )
-          .setDescription('Usa `/ticket categoria` para agregar tipos de ticket al select menu.')
-          .setFooter({ text: 'System 777 · Dev: 777' })],
+          .setColor(0x5865F2)
+          .setTitle('🎫 Configura Tickets desde el Dashboard')
+          .setDescription('Ya no necesitas comandos. Todo se configura desde la web.\n\n🌐 **[Abrir Dashboard](https://jrsystem7777.com/bot/dashboard)**')
+          .setFooter({ text: 'System 777 · Dashboard' })],
         flags: MessageFlags.Ephemeral,
       });
     }

@@ -288,9 +288,22 @@ async function openModal(interaction, categoryId = 'default') {
 }
 
 async function createTicket(interaction, categoryId, razon, prioHint = '') {
-  const cfg = db.get('ticketConfig', interaction.guild.id, {});
+  let cfg = db.get('ticketConfig', interaction.guild.id, {});
+  // Fallback: read from file if cache is empty
   if (!cfg.supportRole && !cfg.categories?.length) {
-    return interaction.reply({ content: '❌ Tickets no configurados. Usa `/ticket setup`.', flags: MessageFlags.Ephemeral });
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const dataFile = path.join(__dirname, '../../data/ticketConfig.json');
+      const allData = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+      if (allData[interaction.guild.id]) {
+        cfg = allData[interaction.guild.id];
+        db.set('ticketConfig', interaction.guild.id, cfg);
+      }
+    } catch {}
+  }
+  if (!cfg.supportRole && !cfg.categories?.length) {
+    return interaction.reply({ content: '❌ Tickets no configurados desde el Dashboard.', flags: MessageFlags.Ephemeral });
   }
 
   const allTickets   = db.all('tickets');

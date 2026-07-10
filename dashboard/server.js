@@ -288,13 +288,8 @@ module.exports = function startDashboard(client) {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
 
-    const fs2 = require('fs');
-    const path2 = require('path');
-    const dataDir = path2.join(__dirname, '../data');
-    let allTicketConfig = {};
-    try { allTicketConfig = JSON.parse(fs2.readFileSync(path2.join(dataDir, 'ticketConfig.json'), 'utf8')); } catch {}
-    const ticketConfig = allTicketConfig[req.params.id] || {};
     const config = db.get('guilds', req.params.id, {});
+    const ticketConfig = db.get('ticketConfig', req.params.id, {});
 
     const channels = [...guild.channels.cache.values()]
       .filter(c => [0, 2, 4, 5].includes(c.type))
@@ -330,12 +325,8 @@ module.exports = function startDashboard(client) {
 
   // ── Public ticket config endpoint ────────────────────────────────────────
   app.get('/api/public/ticket/:guildId', (req, res) => {
-    const fs3 = require('fs');
-    const path3 = require('path');
-    const dataFile = path3.join(__dirname, '../data/ticketConfig.json');
-    let allData = {};
-    try { allData = JSON.parse(fs3.readFileSync(dataFile, 'utf8')); } catch {}
-    res.json({ ok: true, config: allData[req.params.guildId] || {} });
+    const cfg = db.get('ticketConfig', req.params.guildId, {});
+    res.json({ ok: true, config: cfg });
   });
 
   app.post('/api/public/guild/:id/modules', (req, res) => {
@@ -377,12 +368,7 @@ module.exports = function startDashboard(client) {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
     const d = req.body;
-    const fs = require('fs');
-    const path = require('path');
-    const dataFile = path.join(__dirname, '../data/ticketConfig.json');
-    let allData = {};
-    try { allData = JSON.parse(fs.readFileSync(dataFile, 'utf8')); } catch {}
-    const cfg = allData[req.params.id] || {};
+    const cfg = db.get('ticketConfig', req.params.id, {});
     if (d.channelId) cfg.panelChannel = d.channelId;
     if (d.supportRoleId) cfg.supportRole = d.supportRoleId;
     if (d.logChannelId) cfg.logChannel = d.logChannelId;
@@ -395,8 +381,7 @@ module.exports = function startDashboard(client) {
     if (d.welcomeMsg) cfg.welcomeMessage = d.welcomeMsg;
     if (d.categories) cfg.categories = d.categories;
     if (!cfg.categories) cfg.categories = [];
-    allData[req.params.id] = cfg;
-    fs.writeFileSync(dataFile, JSON.stringify(allData, null, 2));
+    db.set('ticketConfig', req.params.id, cfg);
     res.json({ ok: true });
   });
 
@@ -425,10 +410,7 @@ module.exports = function startDashboard(client) {
   app.post('/api/public/guild/:id/tickets/panel', async (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
-    const fs = require('fs');
-    const pathMod = require('path');
-    let cfg = {};
-    try { cfg = JSON.parse(fs.readFileSync(pathMod.join(__dirname, '../data/ticketConfig.json'), 'utf8'))[req.params.id] || {}; } catch {}
+    const cfg = db.get('ticketConfig', req.params.id, {});
     const ch = guild.channels.cache.get(cfg.panelChannel);
     if (!ch) return res.status(400).json({ ok: false, msg: 'Canal de tickets no configurado. Configura el canal del panel primero.' });
     try {

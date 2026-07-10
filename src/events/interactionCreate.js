@@ -1,4 +1,4 @@
-﻿const {
+const {
   EmbedBuilder, MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
 } = require('discord.js');
 const db        = require('../utils/db');
@@ -15,6 +15,22 @@ module.exports = {
 
     // ── BOTONES ────────────────────────────────────────────────────
     if (interaction.isButton()) {
+      // Verify button
+      if (interaction.customId === 'verify_button') {
+        const cfg = db.get('guilds', interaction.guild.id, {});
+        const verifyCfg = cfg.verification || {};
+        if (!verifyCfg.active || !verifyCfg.roleId) {
+          return interaction.reply({ content: '❌ Verificación no configurada.', flags: MessageFlags.Ephemeral });
+        }
+        try {
+          await interaction.member.roles.add(verifyCfg.roleId);
+          await interaction.reply({ content: '✅ ¡Verificado! Ahora tienes acceso al servidor.', flags: MessageFlags.Ephemeral });
+        } catch (e) {
+          await interaction.reply({ content: '❌ No pude darte el rol. Contacta al staff.', flags: MessageFlags.Ephemeral });
+        }
+        return;
+      }
+
       // Giveaway: gw_enter_<messageId>
       if (interaction.customId.startsWith('gw_enter_')) {
         const gwId = interaction.customId.replace('gw_enter_', '');
