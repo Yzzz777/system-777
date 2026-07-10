@@ -311,13 +311,18 @@ module.exports = {
           if (id === 'tkt_delete')          return await tkt.deleteTicket(interaction);
           if (id === 'tkt_add_user')        return await tkt.openAddUserModal(interaction);
           if (id === 'tkt_rating') {
-            const { ModalBuilder: MB, TextInputBuilder: TIB, TextInputStyle: TIS, ActionRowBuilder: ARB } = require('discord.js');
-            const modal = new MB().setCustomId('tkt_rating_modal').setTitle('⭐ Valorar Atención');
-            modal.addComponents(
-              new ARB().addComponents(new TIB().setCustomId('tkt_rating_stars').setLabel('Estrellas (1-5)').setStyle(TIS.Short).setPlaceholder('5').setRequired(true)),
-              new ARB().addComponents(new TIB().setCustomId('tkt_rating_comment').setLabel('Comentario (opcional)').setStyle(TIS.Paragraph).setPlaceholder('Describe tu experiencia...').setRequired(false)),
-            );
-            return interaction.showModal(modal);
+            const { StringSelectMenuBuilder: SSMB, ActionRowBuilder: ARB } = require('discord.js');
+            const select = new SSMB()
+              .setCustomId('tkt_rating_select')
+              .setPlaceholder('⭐ ¿Cómo fue tu experiencia?')
+              .addOptions([
+                { label: '⭐', value: '1', description: 'Mala experiencia' },
+                { label: '⭐⭐', value: '2', description: 'Regular' },
+                { label: '⭐⭐⭐', value: '3', description: 'Buena' },
+                { label: '⭐⭐⭐⭐', value: '4', description: 'Muy buena' },
+                { label: '⭐⭐⭐⭐⭐', value: '5', description: 'Excelente' },
+              ]);
+            return interaction.reply({ components: [new ARB().addComponents(select)], flags: MessageFlags.Ephemeral });
           }
           if (id === 'tkt_move') {
             const db2 = require('../utils/db');
@@ -404,6 +409,17 @@ module.exports = {
       try {
         if (interaction.customId === 'tkt_select')   return await tkt.openModal(interaction, interaction.values[0]);
         if (interaction.customId === 'tkt_priority') return await tkt.setPriority(interaction);
+        if (interaction.customId === 'tkt_rating_select') {
+          const stars = parseInt(interaction.values[0]);
+          const ticketData = db.get('tickets', interaction.channel.id);
+          if (ticketData) {
+            ticketData.rating = stars;
+            ticketData.ratedAt = Date.now();
+            db.set('tickets', interaction.channel.id, ticketData);
+          }
+          const starsEmoji = '⭐'.repeat(stars);
+          return interaction.update({ content: `${starsEmoji} ¡Gracias por tu valoración!`, components: [] });
+        }
         if (interaction.customId === 'tkt_move_select') {
           const newCatId = interaction.values[0];
           const ticketData2 = db.get('tickets', interaction.channel.id);
