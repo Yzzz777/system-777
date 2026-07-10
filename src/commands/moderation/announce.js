@@ -36,11 +36,12 @@ module.exports = {
 
     const content = pingRol ? `${pingRol}` : undefined;
 
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     try {
       await canal.send({ content, embeds: [embed], allowedMentions: { roles: pingRol ? [pingRol.id] : [] } });
-      await interaction.reply({ content: `✅ Anuncio enviado en ${canal}.`, flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: `✅ Anuncio enviado en ${canal}.` });
     } catch (e) {
-      await interaction.reply({ content: `❌ No pude enviar al canal: ${e.message}`, flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: `❌ No pude enviar al canal: ${e.message}` });
     }
   }
 };

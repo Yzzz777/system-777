@@ -9,6 +9,7 @@ module.exports = {
 
   async execute(interaction, client) {
     const code = interaction.options.getString('codigo');
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     let resultado, tipo = 'success', output;
 
@@ -26,7 +27,7 @@ module.exports = {
     const token = process.env.BOT_TOKEN ?? '';
     const safe  = token ? output.replace(new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), '[TOKEN OCULTO]') : output;
 
-    await interaction.reply({
+    await interaction.editReply({
       embeds: [new EmbedBuilder()
         .setColor(tipo === 'success' ? 0x00FF88 : 0xFF4444)
         .setTitle(tipo === 'success' ? '✅ Eval — OK' : '❌ Eval — Error')

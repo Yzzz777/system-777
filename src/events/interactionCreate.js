@@ -93,7 +93,7 @@ module.exports = {
 
       // ── Botones de matrimonio ─────────────────────────────────
       if (interaction.customId.startsWith('marry_')) {
-        return;
+        return interaction.reply({ content: '💍 Esta propuesta ya expiró.', flags: MessageFlags.Ephemeral }).catch(() => {});
       }
 
       // ── Botones Premium: prem_buy_<plan> ─────────────────────
