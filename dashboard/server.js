@@ -289,6 +289,7 @@ module.exports = function startDashboard(client) {
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
 
     const config = db.get('guilds', req.params.id, {});
+    const ticketConfig = db.get('ticketConfig', req.params.id, {});
 
     const channels = [...guild.channels.cache.values()]
       .filter(c => [0, 2, 4, 5].includes(c.type))
@@ -360,7 +361,21 @@ module.exports = function startDashboard(client) {
   app.post('/api/public/guild/:id/tickets/setup', (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
-    publicSaveConfig(req.params.id, 'tickets', req.body);
+    const d = req.body;
+    const cfg = db.get('ticketConfig', req.params.id, {});
+    if (d.channelId) cfg.panelChannel = d.channelId;
+    if (d.supportRoleId) cfg.supportRole = d.supportRoleId;
+    if (d.logChannelId) cfg.logChannel = d.logChannelId;
+    if (d.categoryId) cfg.ticketCategory = d.categoryId;
+    if (d.title) cfg.panelTitle = d.title;
+    if (d.description) cfg.panelDescription = d.description;
+    if (d.color) cfg.panelColor = d.color;
+    if (d.prefix) cfg.prefix = d.prefix;
+    if (d.maxTickets) cfg.maxPerUser = d.maxTickets;
+    if (d.welcomeMsg) cfg.welcomeMessage = d.welcomeMsg;
+    if (d.categories) cfg.categories = d.categories;
+    if (!cfg.categories) cfg.categories = [];
+    db.set('ticketConfig', req.params.id, cfg);
     res.json({ ok: true });
   });
 
@@ -389,18 +404,17 @@ module.exports = function startDashboard(client) {
   app.post('/api/public/guild/:id/tickets/panel', async (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
-    const cfg = db.get('guilds', req.params.id, {});
-    const tc = cfg.tickets || {};
-    const ch = guild.channels.cache.get(tc.channelId);
-    if (!ch) return res.status(400).json({ ok: false, msg: 'Canal de tickets no configurado o no encontrado' });
+    const cfg = db.get('ticketConfig', req.params.id, {});
+    const ch = guild.channels.cache.get(cfg.panelChannel);
+    if (!ch) return res.status(400).json({ ok: false, msg: 'Canal de tickets no configurado. Configura el canal del panel primero.' });
     try {
       const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
       const embed = new EmbedBuilder()
-        .setTitle(tc.title || '🎫 Soporte')
-        .setDescription(tc.description || 'Selecciona el tipo de ticket.')
-        .setColor(tc.color || '#5865F2')
+        .setTitle(cfg.panelTitle || `🎫 Sistema de Soporte — ${guild.name}`)
+        .setDescription(cfg.panelDescription || cfg.panelDesc || 'Selecciona el tipo de ticket.')
+        .setColor(cfg.panelColor || '#5865F2')
         .setFooter({ text: 'System 777 · Tickets' });
-      const cats = (cfg.ticketCategories || []).map(c => ({ label: c.label || c.name, value: c.id, emoji: c.emoji || '🎫', description: c.description || '' }));
+      const cats = (cfg.categories || []).map(c => ({ label: c.label || c.name, value: c.id, emoji: c.emoji || '🎫', description: c.description || '' }));
       if (cats.length === 0) cats.push({ label: 'General', value: 'general', emoji: '🎫', description: 'Soporte general' });
       const select = new StringSelectMenuBuilder()
         .setCustomId('tkt_select')
@@ -475,7 +489,7 @@ module.exports = function startDashboard(client) {
       .map(c => ({ id: c.id, name: c.name }));
 
     res.json({
-      ok: true, config, channels, roles, categories,
+      ok: true, config, ticketConfig, channels, roles, categories,
       guild: {
         id: guild.id, name: guild.name, icon: guild.iconURL(),
         memberCount: guild.memberCount, ownerId: guild.ownerId,
@@ -485,28 +499,11 @@ module.exports = function startDashboard(client) {
     });
   });
 
-  // ── Modules: get / save ─────────────────────────────────────────────────────
-  app.get('/api/guild/:id/modules', auth, canManageGuild, (req, res) => {
-    const cfg = db.get('guilds', req.params.id, {});
-    res.json({ ok: true, modules: cfg.modules || {} });
-  });
+  // ── Guild API ────────────────────────────────────────────────────────────
+  app.get('/api/guild/:id', auth, canManageGuild, (req, res) => {
+    const guild = client.guilds.cache.get(req.params.id);
+    if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
 
-  app.post('/api/guild/:id/modules', auth, canManageGuild, (req, res) => {
-    const { modules } = req.body;
-    if (!modules || typeof modules !== 'object') return res.status(400).json({ ok: false, msg: 'Invalid modules' });
-    const cfg = db.get('guilds', req.params.id, {});
-    cfg.modules = { ...(cfg.modules || {}), ...modules };
-    db.set('guilds', req.params.id, cfg);
-    res.json({ ok: true, modules: cfg.modules });
-  });
-
-  // ── Ticket: setup ───────────────────────────────────────────────────────────
-  app.post('/api/guild/:id/tickets/setup', auth, canManageGuild, (req, res) => {
-    const {
-      panelChannel, supportRole, logChannel, discordCategory,
-      panelTitle, panelDesc, color, panelImage,
-      channelPrefix, max, ping, dm_transcript, welcome_msg, categories,
-    } = req.body;
     const config = db.get('guilds', req.params.id, {});
     config.ticketCfg = {
       ...(config.ticketCfg || {}),
