@@ -310,6 +310,25 @@ module.exports = {
           if (id === 'tkt_transcript')      return await tkt.sendTranscript(interaction);
           if (id === 'tkt_delete')          return await tkt.deleteTicket(interaction);
           if (id === 'tkt_add_user')        return await tkt.openAddUserModal(interaction);
+          if (id === 'tkt_rating') {
+            const { ModalBuilder: MB, TextInputBuilder: TIB, TextInputStyle: TIS, ActionRowBuilder: ARB } = require('discord.js');
+            const modal = new MB().setCustomId('tkt_rating_modal').setTitle('⭐ Valorar Atención');
+            modal.addComponents(
+              new ARB().addComponents(new TIB().setCustomId('tkt_rating_stars').setLabel('Estrellas (1-5)').setStyle(TIS.Short).setPlaceholder('5').setRequired(true)),
+              new ARB().addComponents(new TIB().setCustomId('tkt_rating_comment').setLabel('Comentario (opcional)').setStyle(TIS.Paragraph).setPlaceholder('Describe tu experiencia...').setRequired(false)),
+            );
+            return interaction.showModal(modal);
+          }
+          if (id === 'tkt_move') {
+            const db2 = require('../utils/db');
+            const cfg2 = db2.get('ticketConfig', interaction.guild.id, {});
+            const cats = (cfg2.categories || []).map(c => ({ label: c.label, value: c.id, emoji: c.emoji || '📂' }));
+            if (!cats.length) return interaction.reply({ content: '❌ No hay categorías configuradas.', flags: MessageFlags.Ephemeral });
+            const { StringSelectMenuBuilder: SSMB, ActionRowBuilder: ARB } = require('discord.js');
+            const select = new SSMB().setCustomId('tkt_move_select').setPlaceholder('📂 Mover a categoría...')
+              .addOptions(cats.slice(0, 25));
+            return interaction.reply({ components: [new ARB().addComponents(select)], flags: MessageFlags.Ephemeral });
+          }
           if (id.startsWith('tkt_rating_')) {
             const parts = id.split('_'); // tkt_rating_STARS_CHANNELID
             const stars  = parseInt(parts[2]);
@@ -385,6 +404,18 @@ module.exports = {
       try {
         if (interaction.customId === 'tkt_select')   return await tkt.openModal(interaction, interaction.values[0]);
         if (interaction.customId === 'tkt_priority') return await tkt.setPriority(interaction);
+        if (interaction.customId === 'tkt_move_select') {
+          const newCatId = interaction.values[0];
+          const ticketData2 = db.get('tickets', interaction.channel.id);
+          if (!ticketData2) return interaction.reply({ content: '❌ Ticket no encontrado.', flags: MessageFlags.Ephemeral });
+          const cfg3 = db.get('ticketConfig', interaction.guild.id, {});
+          const newCat = cfg3.categories?.find(c => c.id === newCatId);
+          ticketData2.category = newCat?.label || newCatId;
+          ticketData2.categoryId = newCatId;
+          db.set('tickets', interaction.channel.id, ticketData2);
+          await interaction.channel.setName(`${newCat?.emoji || '🎫'}-${newCat?.label || newCatId}-${ticketData2.number}`).catch(() => {});
+          return interaction.reply({ content: `✅ Ticket movido a **${newCat?.label || newCatId}**.`, flags: MessageFlags.Ephemeral });
+        }
       } catch (e) {
         console.error('[TICKET] Error en select menu:', e.message);
         interaction.reply({ content: '❌ Error procesando selección de ticket.', flags: MessageFlags.Ephemeral }).catch(() => {});
@@ -393,6 +424,27 @@ module.exports = {
 
     // ── MODALES ────────────────────────────────────────────────────
     if (interaction.isModalSubmit()) {
+      // Ticket: rating modal
+      if (interaction.customId === 'tkt_rating_modal') {
+        const stars = parseInt(interaction.fields.getTextInputValue('tkt_rating_stars'));
+        const comment = interaction.fields.getTextInputValue('tkt_rating_comment') || '';
+        if (isNaN(stars) || stars < 1 || stars > 5) {
+          return interaction.reply({ content: '❌ Ingresa un número del 1 al 5.', flags: MessageFlags.Ephemeral });
+        }
+        const ticketData3 = db.get('tickets', interaction.channel.id);
+        if (ticketData3) {
+          ticketData3.rating = stars;
+          ticketData3.ratingComment = comment;
+          ticketData3.ratedAt = Date.now();
+          db.set('tickets', interaction.channel.id, ticketData3);
+        }
+        const starsEmoji = '⭐'.repeat(stars);
+        return interaction.reply({ embeds: [new EmbedBuilder()
+          .setColor(0xFEE75C)
+          .setTitle('⭐ Valoración Enviada')
+          .setDescription(`${starsEmoji}\n${comment ? `**Comentario:** ${comment}` : 'Sin comentario'}`)
+          .setFooter({ text: 'System 777 · Gracias por tu valoración' })] });
+      }
       // Ticket: modal de apertura
       if (interaction.customId.startsWith('tkt_modal_') && interaction.customId !== 'tkt_modal_close' && interaction.customId !== 'tkt_modal_add_user') {
         const categoryId = interaction.customId.replace('tkt_modal_', '');

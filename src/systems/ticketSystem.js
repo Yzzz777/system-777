@@ -122,12 +122,12 @@ function buildPanel(cfg, guild) {
     .setTitle(cfg.panelTitle || `🎫 Sistema de Soporte — ${guild.name}`)
     .setDescription(
       cfg.panelDesc ?? cfg.panelDescription ??
-      '> ¿Necesitas ayuda? Abre un ticket y nuestro equipo te atenderá pronto.\n\n' +
-      '**📋 ¿Cómo funciona?**\n' +
-      '1️⃣ · Selecciona el tipo de soporte\n' +
-      '2️⃣ · Describe tu problema en el formulario\n' +
-      '3️⃣ · Un miembro del staff te atenderá\n\n' +
-      '*No abras tickets innecesarios. Respeta al staff.*'
+      `> **¿Necesitas ayuda?** Abre un ticket y nuestro equipo te atenderá pronto.\n\n` +
+      `**📋 ¿Cómo funciona?**\n` +
+      `> 1️⃣ · Selecciona el tipo de soporte que necesitas\n` +
+      `> 2️⃣ · Describe tu problema en el formulario\n` +
+      `> 3️⃣ · Un miembro del staff te atenderá\n\n` +
+      `> ⚠️ *No abras tickets innecesarios. Respeta al staff.*`
     )
     .setThumbnail(guild.iconURL({ size: 256 }))
     .setFooter({ text: `${guild.name} · Soporte • Powered by System 777`, iconURL: guild.iconURL() || undefined })
@@ -154,7 +154,15 @@ function buildPanel(cfg, guild) {
         .setCustomId(`tkt_open_${c.id}`)
         .setLabel(c.label)
         .setStyle(style);
-      if (c.emoji) btn.setEmoji(c.emoji);
+      if (c.emoji) {
+        // Support custom emojis from other servers: <:name:id> or <a:name:id>
+        const customEmoji = c.emoji.match(/^<a?:([a-zA-Z0-9_]+):(\d+)>$/);
+        if (customEmoji) {
+          btn.setEmoji({ name: customEmoji[1], id: customEmoji[2], animated: c.emoji.startsWith('<a:') });
+        } else {
+          btn.setEmoji(c.emoji);
+        }
+      }
       const rowIdx = Math.floor(i / 5);
       if (!rows[rowIdx]) rows[rowIdx] = new ActionRowBuilder();
       rows[rowIdx].addComponents(btn);
@@ -164,11 +172,21 @@ function buildPanel(cfg, guild) {
     const select = new StringSelectMenuBuilder()
       .setCustomId('tkt_select')
       .setPlaceholder('📂 Selecciona el tipo de soporte...')
-      .addOptions(categories.map(c => ({
-        label: c.label, value: c.id,
-        description: c.description?.slice(0, 100),
-        emoji: c.emoji,
-      })));
+      .addOptions(categories.map(c => {
+        const opt = {
+          label: c.label, value: c.id,
+          description: c.description?.slice(0, 100),
+        };
+        if (c.emoji) {
+          const customEmoji = c.emoji.match(/^<a?:([a-zA-Z0-9_]+):(\d+)>$/);
+          if (customEmoji) {
+            opt.emoji = { name: customEmoji[1], id: customEmoji[2], animated: c.emoji.startsWith('<a:') };
+          } else {
+            opt.emoji = c.emoji;
+          }
+        }
+        return opt;
+      }));
     components = [new ActionRowBuilder().addComponents(select)];
   }
 
@@ -200,7 +218,7 @@ function buildControlPanel(ticketData) {
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId('tkt_delete')
-      .setLabel('🗑️')
+      .setLabel('🗑️ Eliminar')
       .setStyle(ButtonStyle.Danger),
   );
 
@@ -216,7 +234,18 @@ function buildControlPanel(ticketData) {
       ])
   );
 
-  return [row1, row2];
+  const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('tkt_rating')
+      .setLabel('⭐ Valorar')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('tkt_move')
+      .setLabel('📂 Mover')
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  return [row1, row2, row3];
 }
 
 // ── EMBED DEL TICKET ──────────────────────────────────────────────────────────
