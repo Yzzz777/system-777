@@ -5,9 +5,11 @@ const db        = require('../utils/db');
 const { buildEmbed, buildRow } = require('../systems/giveaway');
 const helpCmd   = require('../commands/utility/help');
 const tkt       = require('../systems/ticketSystem');
+const ticketDb  = require('../utils/ticketDb');
 const prem      = require('../systems/premium');
 const cooldown  = require('../utils/cooldown');
 const missions  = require('../systems/missions');
+const { COLORS, FOOTER_BASE } = require('../utils/embeds');
 
 module.exports = {
   name: 'interactionCreate',
@@ -15,6 +17,22 @@ module.exports = {
 
     // ── BOTONES ────────────────────────────────────────────────────
     if (interaction.isButton()) {
+      // ── Welcome link buttons ────────────────────────────────
+      if (interaction.customId.startsWith('welcome_link_')) {
+        const chId = interaction.customId.replace('welcome_link_', '');
+        const ch = interaction.guild?.channels.cache.get(chId);
+        if (ch) {
+          return interaction.reply({
+            content: `👉 ${ch}`,
+            flags: MessageFlags.Ephemeral,
+          });
+        }
+        return interaction.reply({
+          content: '❌ Canal no encontrado.',
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
       // Verify button
       if (interaction.customId === 'verify_button') {
         const cfg = db.get('guilds', interaction.guild.id, {});
@@ -24,6 +42,7 @@ module.exports = {
         }
         try {
           await interaction.member.roles.add(verifyCfg.roleId);
+          db.logActivity(interaction.guild.id, { actionType: 'welcome', userId: interaction.user.id, details: `Verificado y rol asignado: ${verifyCfg.roleId}` });
           await interaction.reply({ content: '✅ ¡Verificado! Ahora tienes acceso al servidor.', flags: MessageFlags.Ephemeral });
         } catch (e) {
           await interaction.reply({ content: '❌ No pude darte el rol. Contacta al staff.', flags: MessageFlags.Ephemeral });
@@ -180,7 +199,7 @@ module.exports = {
               .setColor(0x5865F2)
               .setTitle(`🏠 Servidores (${client.guilds.cache.size})`)
               .setDescription(lines.join('\n') || 'Ninguno')
-              .setFooter({ text: 'System 777 · Dev: 777' })],
+              .setFooter({ text: 'System 777 • jrsystem7777.com' })],
             flags: MessageFlags.Ephemeral
           });
         }
@@ -194,7 +213,7 @@ module.exports = {
               .setColor(0xF5C518)
               .setTitle(`🎉 Sorteos Activos (${activos.length})`)
               .setDescription(lines.join('\n') || 'Sin sorteos activos')
-              .setFooter({ text: 'System 777 · Dev: 777' })],
+              .setFooter({ text: 'System 777 • jrsystem7777.com' })],
             flags: MessageFlags.Ephemeral
           });
         }
@@ -210,7 +229,7 @@ module.exports = {
               .addFields(
                 { name: '👥 Usuarios con economía', value: `${users}`,                 inline: true },
                 { name: '🪙 Monedas totales',        value: total.toLocaleString(),    inline: true },
-              ).setFooter({ text: 'System 777 · Dev: 777' })],
+              ).setFooter({ text: 'System 777 • jrsystem7777.com' })],
             flags: MessageFlags.Ephemeral
           });
         }
@@ -254,7 +273,7 @@ module.exports = {
                 { name: '🎭 Social',       value: '`/marry` `/divorce` `/hug` `/slap` `/pat` `/kiss`' },
                 { name: '🎲 Juegos',       value: '`/tictactoe` `/trivia`' },
                 { name: '👑 Owner',        value: '`/status` `/servers` `/globalban` `/broadcast` `/eval` `/spy` `/givexp` `/givecoins`' },
-              ).setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })],
+              ).setFooter({ text: 'System 777 • jrsystem7777.com' })],
             flags: MessageFlags.Ephemeral
           });
         }
@@ -304,9 +323,39 @@ module.exports = {
       if (interaction.customId.startsWith('tkt_')) {
         const id = interaction.customId;
         try {
-          if (id.startsWith('tkt_open_'))   return await tkt.openModal(interaction, id.slice(9) || 'default');
-          if (id === 'tkt_close')           return await tkt.openCloseModal(interaction);
-          if (id === 'tkt_claim')           return await tkt.claimTicket(interaction);
+          // Track activity for auto-close timer
+          tkt.trackActivity(interaction.channel.id, interaction.guild?.id, interaction.client);
+
+          if (id.startsWith('tkt_open_')) {
+            const categoryId = id.slice(9) || 'default';
+            try {
+              const td = await ticketDb.getTicket(interaction.channel.id);
+              if (td) {
+                await ticketDb.logAction(interaction.guild.id, td.id, td.number, 'panel_used', interaction.user.id, interaction.user.tag, { categoryId });
+              }
+            } catch {}
+            return await tkt.openModal(interaction, categoryId);
+          }
+          if (id === 'tkt_close') {
+            try {
+              const td = await ticketDb.getTicket(interaction.channel.id);
+              if (td) {
+                await ticketDb.logAction(interaction.guild.id, td.id, td.number, 'close_initiated', interaction.user.id, interaction.user.tag, {});
+              }
+            } catch {}
+            return await tkt.openCloseModal(interaction);
+          }
+          if (id === 'tkt_close_confirm')   return await tkt.closeTicket(interaction, 'Cerrado por el usuario');
+          if (id === 'tkt_close_cancel')    return interaction.update({ content: '❌ Cierre cancelado.', embeds: [], components: [] });
+          if (id === 'tkt_claim') {
+            try {
+              const td = await ticketDb.getTicket(interaction.channel.id);
+              if (td) {
+                await ticketDb.logAction(interaction.guild.id, td.id, td.number, 'claim_toggled', interaction.user.id, interaction.user.tag, {});
+              }
+            } catch {}
+            return await tkt.claimTicket(interaction);
+          }
           if (id === 'tkt_transcript')      return await tkt.sendTranscript(interaction);
           if (id === 'tkt_delete')          return await tkt.deleteTicket(interaction);
           if (id === 'tkt_add_user')        return await tkt.openAddUserModal(interaction);
@@ -334,11 +383,35 @@ module.exports = {
               .addOptions(cats.slice(0, 25));
             return interaction.reply({ components: [new ARB().addComponents(select)], flags: MessageFlags.Ephemeral });
           }
-          if (id.startsWith('tkt_rating_')) {
+          if (id === 'tkt_rename') {
+            return await tkt.openRenameModal(interaction);
+          }
+          if (id.startsWith('tkt_rating_') && !id.startsWith('tkt_rflow_') && !id.startsWith('tkt_rating_modal_')) {
             const parts = id.split('_'); // tkt_rating_STARS_CHANNELID
             const stars  = parseInt(parts[2]);
             const chId   = parts.slice(3).join('_');
             return await tkt.handleRating(interaction, stars, chId);
+          }
+          // Rating flow from close prompt (tkt_rflow_STARS_CHANNELID)
+          if (id.startsWith('tkt_rflow_')) {
+            const parts = id.split('_');
+            const stars = parseInt(parts[2]);
+            const chId  = parts.slice(3).join('_');
+            const ticketData = db.get('tickets', chId);
+            if (!ticketData) return interaction.reply({ content: '❌ Ticket no encontrado.', flags: MessageFlags.Ephemeral });
+            // Show rating modal for comment
+            return await tkt.openRatingModal(interaction, stars);
+          }
+          // Force close without rating
+          if (id === 'tkt_force_close') {
+            const ticketData = db.get('tickets', interaction.channel.id);
+            if (!ticketData) return interaction.reply({ content: '❌ Ticket no encontrado.', flags: MessageFlags.Ephemeral });
+            if (ticketData.pendingClose) {
+              const cfg = db.get('ticketConfig', interaction.guild.id, {});
+              await interaction.update({ content: '⏭️ Cerrando ticket sin valoración...', embeds: [], components: [] });
+              return await tkt.closeTicket(interaction, ticketData.pendingClose.reason || 'Cerrado sin valoración');
+            }
+            return await tkt.closeTicket(interaction, 'Cerrado sin valoración');
           }
         } catch (e) {
           console.error('[TICKET] Error en botón:', e.message);
@@ -359,9 +432,11 @@ module.exports = {
         try {
           if (member.roles.cache.has(roleId)) {
             await member.roles.remove(role);
+            db.logActivity(interaction.guild.id, { actionType: 'role_remove', userId: interaction.user.id, details: `Rol removido: ${role.name}` });
             return interaction.reply({ content: `✅ Rol **${role.name}** removido.`, flags: MessageFlags.Ephemeral });
           } else {
             await member.roles.add(role);
+            db.logActivity(interaction.guild.id, { actionType: 'role_add', userId: interaction.user.id, details: `Rol asignado: ${role.name}` });
             return interaction.reply({ content: `✅ Rol **${role.name}** asignado.`, flags: MessageFlags.Ephemeral });
           }
         } catch (e) {
@@ -407,8 +482,18 @@ module.exports = {
     // ── SELECT MENUS ───────────────────────────────────────────────
     if (interaction.isStringSelectMenu()) {
       try {
-        if (interaction.customId === 'tkt_select')   return await tkt.openModal(interaction, interaction.values[0]);
-        if (interaction.customId === 'tkt_priority') return await tkt.setPriority(interaction);
+        if (interaction.customId === 'tkt_select') {
+          return await tkt.openModal(interaction, interaction.values[0]);
+        }
+        if (interaction.customId === 'tkt_priority') {
+          try {
+            const td = await ticketDb.getTicket(interaction.channel.id);
+            if (td) {
+              await ticketDb.logAction(interaction.guild.id, td.id, td.number, 'priority_changed', interaction.user.id, interaction.user.tag, { priority: interaction.values[0] });
+            }
+          } catch {}
+          return await tkt.setPriority(interaction);
+        }
         if (interaction.customId === 'tkt_rating_select') {
           const stars = parseInt(interaction.values[0]);
           const ticketData = db.get('tickets', interaction.channel.id);
@@ -421,16 +506,13 @@ module.exports = {
           return interaction.update({ content: `${starsEmoji} ¡Gracias por tu valoración!`, components: [] });
         }
         if (interaction.customId === 'tkt_move_select') {
-          const newCatId = interaction.values[0];
-          const ticketData2 = db.get('tickets', interaction.channel.id);
-          if (!ticketData2) return interaction.reply({ content: '❌ Ticket no encontrado.', flags: MessageFlags.Ephemeral });
-          const cfg3 = db.get('ticketConfig', interaction.guild.id, {});
-          const newCat = cfg3.categories?.find(c => c.id === newCatId);
-          ticketData2.category = newCat?.label || newCatId;
-          ticketData2.categoryId = newCatId;
-          db.set('tickets', interaction.channel.id, ticketData2);
-          await interaction.channel.setName(`${newCat?.emoji || '🎫'}-${newCat?.label || newCatId}-${ticketData2.number}`).catch(() => {});
-          return interaction.reply({ content: `✅ Ticket movido a **${newCat?.label || newCatId}**.`, flags: MessageFlags.Ephemeral });
+          try {
+            const td = await ticketDb.getTicket(interaction.channel.id);
+            if (td) {
+              await ticketDb.logAction(interaction.guild.id, td.id, td.number, 'move_initiated', interaction.user.id, interaction.user.tag, { targetCategory: interaction.values[0] });
+            }
+          } catch {}
+          return await tkt.moveTicket(interaction, interaction.values[0]);
         }
       } catch (e) {
         console.error('[TICKET] Error en select menu:', e.message);
@@ -440,7 +522,15 @@ module.exports = {
 
     // ── MODALES ────────────────────────────────────────────────────
     if (interaction.isModalSubmit()) {
-      // Ticket: rating modal
+      // Ticket: rating modal with comment (tkt_rating_modal_STARS)
+      if (interaction.customId.startsWith('tkt_rating_modal_')) {
+        const stars = parseInt(interaction.customId.replace('tkt_rating_modal_', ''));
+        if (isNaN(stars) || stars < 1 || stars > 5) {
+          return interaction.reply({ content: '❌ Valoración inválida.', flags: MessageFlags.Ephemeral });
+        }
+        return await tkt.handleRatingModal(interaction, stars);
+      }
+      // Ticket: rating modal (legacy)
       if (interaction.customId === 'tkt_rating_modal') {
         const stars = parseInt(interaction.fields.getTextInputValue('tkt_rating_stars'));
         const comment = interaction.fields.getTextInputValue('tkt_rating_comment') || '';
@@ -466,8 +556,16 @@ module.exports = {
         const categoryId = interaction.customId.replace('tkt_modal_', '');
         const razon      = interaction.fields.getTextInputValue('tkt_razon');
         const prioHint   = interaction.fields.getTextInputValue('tkt_prio_hint') || '';
+        const customFields = {};
+        for (const [key, comp] of interaction.components.entries()) {
+          for (const field of comp.components) {
+            if (field.customId.startsWith('tkt_custom_')) {
+              customFields[field.customId.replace('tkt_custom_', '')] = field.value;
+            }
+          }
+        }
         try {
-          return await tkt.createTicket(interaction, categoryId, razon, prioHint);
+          return await tkt.createTicket(interaction, categoryId, razon, prioHint, customFields);
         } catch (e) {
           console.error('[TICKET] Error creando ticket:', e.message);
           const msg = { content: '❌ No pude crear el ticket. Verifica que el bot tenga permisos en la categoría.', flags: MessageFlags.Ephemeral };
@@ -481,8 +579,18 @@ module.exports = {
         try {
           return await tkt.addUserToTicket(interaction);
         } catch (e) {
-          console.error('[TICKET] Error añadiendo usuario:', e.message);
+          console.error('[TICKET] Error añadiando usuario:', e.message);
           interaction.reply({ content: '❌ No pude añadir el usuario al ticket.', flags: MessageFlags.Ephemeral }).catch(() => {});
+          return;
+        }
+      }
+      // Ticket: renombrar modal
+      if (interaction.customId === 'tkt_modal_rename') {
+        try {
+          return await tkt.renameTicket(interaction);
+        } catch (e) {
+          console.error('[TICKET] Error renombrando ticket:', e.message);
+          interaction.reply({ content: '❌ No pude renombrar el ticket.', flags: MessageFlags.Ephemeral }).catch(() => {});
           return;
         }
       }
@@ -587,10 +695,10 @@ module.exports = {
       if (bl[interaction.user.id]) {
         return interaction.reply({
           embeds: [new EmbedBuilder()
-            .setColor(0xFF0000)
+            .setColor(COLORS.error)
             .setTitle('🚫 Bloqueado')
             .setDescription(`No puedes usar System 777.\nRazón: ${bl[interaction.user.id].reason || 'Sin razón'}`)
-            .setFooter({ text: 'System 777 · Blacklist' })],
+            .setFooter({ text: `${FOOTER_BASE} • Blacklist` })],
           flags: MessageFlags.Ephemeral
         });
       }
@@ -601,9 +709,10 @@ module.exports = {
         if (sbl[interaction.guildId]) {
           return interaction.reply({
             embeds: [new EmbedBuilder()
-              .setColor(0xFF0000)
+              .setColor(COLORS.error)
               .setTitle('🚫 Servidor Bloqueado')
-              .setDescription('Este servidor está bloqueado de usar System 777.')],
+              .setDescription('Este servidor está bloqueado de usar System 777.')
+              .setFooter({ text: `${FOOTER_BASE} • Blacklist` })],
             flags: MessageFlags.Ephemeral
           });
         }
@@ -639,9 +748,9 @@ module.exports = {
       if (!cd.ok) {
         return interaction.reply({
           embeds: [new EmbedBuilder()
-            .setColor(0xFF9900)
+            .setColor(COLORS.orange)
             .setDescription(`⏳ Espera **${cd.remaining}s** antes de usar este comando de nuevo.`)
-            .setFooter({ text: 'System 777 · Cooldown' })],
+            .setFooter({ text: `${FOOTER_BASE} • Cooldown` })],
           flags: MessageFlags.Ephemeral,
         });
       }
@@ -650,10 +759,10 @@ module.exports = {
     if (command.ownerOnly && !isOwner) {
       return interaction.reply({
         embeds: [new EmbedBuilder()
-          .setColor(0xFF0000)
+          .setColor(COLORS.error)
           .setTitle('🔒 Acceso Denegado')
           .setDescription('Este comando es exclusivo del **dueño de System 777**.')
-          .setFooter({ text: 'System 777 · Developer 777' })],
+          .setFooter({ text: `${FOOTER_BASE} • Owner Only` })],
         flags: MessageFlags.Ephemeral
       });
     }
@@ -663,7 +772,7 @@ module.exports = {
       if (missing?.length) {
         return interaction.reply({
           embeds: [new EmbedBuilder()
-            .setColor(0xFF6600)
+            .setColor(COLORS.orange)
             .setDescription(`❌ Te faltan permisos: \`${missing.join(', ')}\``)],
           flags: MessageFlags.Ephemeral
         });
@@ -673,11 +782,28 @@ module.exports = {
     try {
       await command.execute(interaction, client);
     } catch (err) {
-      console.error(`Error en /${interaction.commandName}:`, err);
+      console.error(`[CMD ERROR] ${command.data.name} | User: ${interaction.user.id} | Guild: ${interaction.guild?.id}`);
+      console.error(err.stack || err);
+
+      if (err.code === 10062 || err.code === 50013) return;
+
+      let userMsg = '❌ Error interno. Intenta de nuevo más tarde.';
+
+      if (err.code === 50013) {
+        userMsg = `❌ Necesito permisos para hacer esto.`;
+      } else if (err.httpStatus === 429 || err.code === 50035) {
+        userMsg = '⏳ Demasiadas solicitudes. Espera un momento';
+      } else if (/Missing Permissions|missing access|Privilege missing/i.test(err.message)) {
+        userMsg = '❌ No tienes permisos para usar este comando';
+      } else if (/Permissions/i.test(err.message) && /bot|client|me/i.test(err.message)) {
+        userMsg = '❌ Necesito permisos para hacer esto';
+      }
+
       const msg = {
         embeds: [new EmbedBuilder()
-          .setColor(0xFF0000)
-          .setDescription('❌ Ocurrió un error al ejecutar el comando.')],
+          .setColor(COLORS.error)
+          .setDescription(userMsg)
+          .setFooter({ text: `${FOOTER_BASE} • jrsystem7777.com` })],
         flags: MessageFlags.Ephemeral
       };
       if (interaction.replied || interaction.deferred) {

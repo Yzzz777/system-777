@@ -1,8 +1,9 @@
 const {
-  SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags,
+  SlashCommandBuilder, PermissionFlagsBits, MessageFlags,
 } = require('discord.js');
 const db = require('../../utils/db');
 const tkt = require('../../systems/ticketSystem');
+const { ticketEmbed, successEmbed, infoEmbed, createEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -114,17 +115,14 @@ module.exports = {
   userPermissions: [PermissionFlagsBits.ManageGuild],
 
   async execute(interaction) {
+    if (!interaction.guild) return interaction.reply({ content: '❌ Este comando solo funciona en servidores.', flags: MessageFlags.Ephemeral });
     const sub = interaction.options.getSubcommand();
     const cfg = db.get('ticketConfig', interaction.guild.id, {});
 
     // ── setup ───────────────────────────────────────────────────────────────
     if (sub === 'setup') {
       return interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setTitle('🎫 Configura Tickets desde el Dashboard')
-          .setDescription('Ya no necesitas comandos. Todo se configura desde la web.\n\n🌐 **[Abrir Dashboard](https://jrsystem7777.com/bot/dashboard)**')
-          .setFooter({ text: 'System 777 · Dashboard' })],
+        embeds: [ticketEmbed('🎫 Configura Tickets desde el Dashboard', 'Ya no necesitas comandos. Todo se configura desde la web.\n\n🌐 **[Abrir Dashboard](https://jrsystem7777.com/bot/dashboard)**')],
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -172,7 +170,7 @@ module.exports = {
 
     // ── add ─────────────────────────────────────────────────────────────────
     if (sub === 'add') {
-      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
+      if (!db.get('tickets', interaction.channel.id)) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
       const user = interaction.options.getUser('usuario');
       await interaction.channel.permissionOverwrites.edit(user.id, {
         ViewChannel: true, SendMessages: true, ReadMessageHistory: true,
@@ -182,7 +180,7 @@ module.exports = {
 
     // ── remove ──────────────────────────────────────────────────────────────
     if (sub === 'remove') {
-      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
+      if (!db.get('tickets', interaction.channel.id)) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
       const user = interaction.options.getUser('usuario');
       await interaction.channel.permissionOverwrites.edit(user.id, { ViewChannel: false });
       return interaction.reply({ content: `✅ ${user} removido del ticket.` });
@@ -190,7 +188,7 @@ module.exports = {
 
     // ── rename ──────────────────────────────────────────────────────────────
     if (sub === 'rename') {
-      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
+      if (!db.get('tickets', interaction.channel.id)) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
       const nombre = interaction.options.getString('nombre').toLowerCase().replace(/[^a-z0-9-]/g, '-');
       await interaction.channel.setName(`ticket-${nombre}`);
       return interaction.reply({ content: `✅ Canal renombrado a \`ticket-${nombre}\`.` });
@@ -198,7 +196,7 @@ module.exports = {
 
     // ── close ───────────────────────────────────────────────────────────────
     if (sub === 'close') {
-      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
+      if (!db.get('tickets', interaction.channel.id)) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
       const razon = interaction.options.getString('razon') ?? 'Cerrado por comando';
       return tkt.closeTicket(interaction, razon);
     }
@@ -211,16 +209,14 @@ module.exports = {
       const cats    = cfg.categories?.map(c => `${c.emoji} **${c.label}** (\`${c.id}\`)`).join('\n') || '*Sin categorías (botón simple)*';
 
       return interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setTitle('🎫 Config — Sistema de Tickets')
-          .addFields(
+        embeds: [ticketEmbed('🎫 Config — Sistema de Tickets', null, {
+          fields: [
             { name: '📌 Canal panel',  value: panelCh, inline: true },
             { name: '🛡️ Rol soporte', value: roleSup, inline: true },
             { name: '📋 Canal logs',   value: logCh,   inline: true },
             { name: '📂 Categorías',   value: cats,    inline: false },
-          )
-          .setFooter({ text: 'System 777 · Dev: 777' })],
+          ]
+        })],
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -235,16 +231,14 @@ module.exports = {
       const total   = db.get('ticketConfig', `count_${interaction.guild.id}`) ?? 0;
 
       return interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setTitle('📊 Estadísticas de Tickets')
-          .addFields(
+        embeds: [ticketEmbed('📊 Estadísticas de Tickets', null, {
+          fields: [
             { name: '📬 Total creados', value: `${total}`,  inline: true },
             { name: '🟢 Abiertos',      value: `${open}`,   inline: true },
             { name: '🔴 Cerrados',       value: `${closed}`, inline: true },
             { name: '🟡 Reclamados',     value: `${claimed}`,inline: true },
-          )
-          .setFooter({ text: 'System 777 · Dev: 777' })],
+          ]
+        })],
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -270,12 +264,9 @@ module.exports = {
       db.set('ticketConfig', interaction.guild.id, cfg);
 
       return interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(cfg.embedColor ?? 0x5865F2)
-          .setTitle('✅ Configuración Actualizada')
-          .setDescription(msg)
-          .addFields(buildConfigFields(cfg))
-          .setFooter({ text: 'System 777 · Tickets Config' })],
+        embeds: [ticketEmbed('✅ Configuración Actualizada', msg, {
+          fields: buildConfigFields(cfg)
+        })],
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -303,17 +294,14 @@ module.exports = {
         const avgTime    = guildTix.filter(t => t.closedAt && t.openedAt)
           .reduce((a, t) => a + (t.closedAt - t.openedAt), 0) / (closed || 1);
 
-        return interaction.editReply({ embeds: [new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setTitle('💠 Ticket Analytics Premium')
-          .addFields(
+        return interaction.editReply({ embeds: [ticketEmbed('💠 Ticket Analytics Premium', null, {
+          fields: [
             { name: '📂 Total tickets',  value: `${guildTix.length}`, inline: true },
             { name: '🟢 Abiertos',       value: `${open}`,            inline: true },
             { name: '✅ Cerrados',        value: `${closed}`,          inline: true },
             { name: '⏱️ Tiempo medio',   value: closed > 0 ? `${Math.floor(avgTime/3600000)}h` : 'N/A', inline: true },
-          )
-          .setFooter({ text: 'System 777 · Ticket Analytics · Pro' })
-          .setTimestamp()] });
+          ]
+        })] });
       }
 
       if (accion === 'branding') {

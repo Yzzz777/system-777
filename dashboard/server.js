@@ -4,6 +4,8 @@ const path    = require('path');
 const https   = require('https');
 const { exec } = require('child_process');
 const db      = require('../src/utils/db');
+const ticketDb = require('../src/utils/ticketDb');
+const ipBan   = require('../src/systems/ipBan');
 
 // ── Discord API helpers ───────────────────────────────────────────────────────
 function discordGet(endpoint, token) {
@@ -51,7 +53,7 @@ function discordExchange(code, callbackUrl) {
 module.exports = function startDashboard(client) {
   const app    = express();
   const PORT   = process.env.PORT || process.env.DASHBOARD_PORT || 3000;
-  const SECRET = process.env.DASHBOARD_SECRET || 'sisten777secret';
+  const SECRET = process.env.DASHBOARD_SECRET || 'system777secret';
 
   // URL fija calculada UNA vez al arrancar — debe ser EXACTA en Discord Dev Portal
   const CALLBACK_URL = (() => {
@@ -227,6 +229,12 @@ module.exports = function startDashboard(client) {
   // ── PUBLIC API (sin login, solo lectura) ─────────────────────────────────
   // Rate limit ligero en memoria
   const rlMap = new Map();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [ip, e] of rlMap) {
+      if (now - e.reset > 60000) rlMap.delete(ip);
+    }
+  }, 10 * 60 * 1000);
   function publicRL(req, res, next) {
     const ip  = req.ip || req.headers['x-forwarded-for'] || 'unknown';
     const now = Date.now();
@@ -284,12 +292,11 @@ module.exports = function startDashboard(client) {
 
   // ── Guild API ───────────────────────────────────────────────────────────────
   // ── Public guild data (channels + roles + config) ────────────────────────
-  app.get('/api/public/guild/:id', (req, res) => {
+  app.get('/api/public/guild/:id', async (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
 
     const config = db.get('guilds', req.params.id, {});
-    const ticketConfig = db.get('ticketConfig', req.params.id, {});
 
     const channels = [...guild.channels.cache.values()]
       .filter(c => [0, 2, 4, 5].includes(c.type))
@@ -323,83 +330,158 @@ module.exports = function startDashboard(client) {
     return cfg[key];
   }
 
-  // ── Public ticket config endpoint ────────────────────────────────────────
-  app.get('/api/public/ticket/:guildId', (req, res) => {
-    const cfg = db.get('ticketConfig', req.params.guildId, {});
+  app.get('/api/public/ticket/:guildId', async (req, res) => {
+    const cfg = await ticketDb.getConfig(req.params.guildId) || {};
+    const categories = await ticketDb.getCategories(req.params.guildId);
+    cfg.categories = categories;
     res.json({ ok: true, config: cfg });
   });
 
-  app.post('/api/public/guild/:id/modules', (req, res) => {
+  app.get('/api/public/ticket/:guildId/stats', async (req, res) => {
+    const stats = await ticketDb.getStats(req.params.guildId);
+    res.json({ ok: true, stats });
+  });
+
+  app.post('/api/public/ticket/:guildId/config', auth, canManageGuild, async (req, res) => {
+    const guild = client.guilds.cache.get(req.params.guildId);
+    if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
+    const current = await ticketDb.getConfig(req.params.guildId) || {};
+    const d = req.body;
+    const updated = {
+      panelChannel: d.panelChannel || current.panelChannel || '',
+      panelMessageId: d.panelMessageId || current.panelMessageId || '',
+      supportRole: d.supportRole || current.supportRole || '',
+      logChannel: d.logChannel || current.logChannel || '',
+      ticketCategory: d.ticketCategory || current.ticketCategory || '',
+      channelPrefix: d.channelPrefix || current.channelPrefix || 'ticket',
+      maxPerUser: d.maxPerUser || current.maxPerUser || 3,
+      pingOnOpen: d.pingOnOpen !== undefined ? d.pingOnOpen : (current.pingOnOpen !== undefined ? current.pingOnOpen : true),
+      dmTranscript: d.dmTranscript !== undefined ? d.dmTranscript : (current.dmTranscript !== undefined ? current.dmTranscript : true),
+      autoCloseMinutes: d.autoCloseMinutes || current.autoCloseMinutes || 60,
+      ratingEnabled: d.ratingEnabled !== undefined ? d.ratingEnabled : true,
+      ratingRequired: d.ratingRequired !== undefined ? d.ratingRequired : false,
+      welcomeMessage: d.welcomeMessage || current.welcomeMessage || '',
+      panelTitle: d.panelTitle || current.panelTitle || 'Soporte',
+      panelDescription: d.panelDescription || current.panelDescription || '',
+      panelColor: d.panelColor || current.panelColor || '#5865F2',
+      panelImage: d.panelImage || current.panelImage || '',
+      formFields: d.formFields || current.formFields || {},
+      autoCloseEnabled: d.autoCloseEnabled !== undefined ? d.autoCloseEnabled : (current.autoCloseEnabled !== undefined ? current.autoCloseEnabled : false),
+      autoCloseMessage: d.autoCloseMessage || current.autoCloseMessage || '',
+    };
+    await ticketDb.saveConfig(req.params.guildId, updated);
+
+    try {
+      await ticketDb.logAction(req.params.guildId, null, null, 'config_updated', req.session.user.id, req.session.user.username, { changes: Object.keys(d) });
+    } catch (e) { console.error('[DASHBOARD] logAction error:', e.message); }
+
+    const bodyCategories = d.categories;
+    if (Array.isArray(bodyCategories)) {
+      const existing = await ticketDb.getCategories(req.params.guildId);
+      for (const cat of bodyCategories) {
+        if (cat.id) {
+          const found = existing.find(c => c.id === cat.id);
+          if (found) {
+            await ticketDb.updateCategory(cat.id, cat);
+            try {
+              await ticketDb.logAction(req.params.guildId, null, null, 'category_updated', req.session.user.id, req.session.user.username, { categoryId: cat.id, label: cat.label });
+            } catch (e) { console.error('[DASHBOARD] logAction error:', e.message); }
+          } else {
+            await ticketDb.addCategory(req.params.guildId, cat);
+            try {
+              await ticketDb.logAction(req.params.guildId, null, null, 'category_added', req.session.user.id, req.session.user.username, { categoryId: cat.id, label: cat.label });
+            } catch (e) { console.error('[DASHBOARD] logAction error:', e.message); }
+          }
+        } else {
+          await ticketDb.addCategory(req.params.guildId, cat);
+          try {
+            await ticketDb.logAction(req.params.guildId, null, null, 'category_added', req.session.user.id, req.session.user.username, { label: cat.label });
+          } catch (e) { console.error('[DASHBOARD] logAction error:', e.message); }
+        }
+      }
+    }
+
+    if (updated.panelChannel) {
+      const tkt = require('../src/systems/ticketSystem');
+      tkt.syncPanel(guild, { ...updated, categories: await ticketDb.getCategories(req.params.guildId) }).catch(() => {});
+    }
+
+    const finalCategories = await ticketDb.getCategories(req.params.guildId);
+    res.json({ ok: true, config: { ...updated, categories: finalCategories } });
+  });
+
+  app.post('/api/public/guild/:id/modules', auth, canManageGuild, (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
     publicSaveConfig(req.params.id, 'modules', req.body.modules || {});
     res.json({ ok: true });
   });
 
-  app.post('/api/public/guild/:id/welcome', (req, res) => {
+  app.post('/api/public/guild/:id/welcome', auth, canManageGuild, (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
     publicSaveConfig(req.params.id, 'welcome', req.body);
     res.json({ ok: true });
   });
 
-  app.post('/api/public/guild/:id/goodbye', (req, res) => {
+  app.post('/api/public/guild/:id/goodbye', auth, canManageGuild, (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
     publicSaveConfig(req.params.id, 'goodbye', req.body);
     res.json({ ok: true });
   });
 
-  app.post('/api/public/guild/:id/autorole', (req, res) => {
+  app.post('/api/public/guild/:id/autorole', auth, canManageGuild, (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
     publicSaveConfig(req.params.id, 'autorole', req.body.roleId || '');
     res.json({ ok: true });
   });
 
-  app.post('/api/public/guild/:id/logs', (req, res) => {
+  app.post('/api/public/guild/:id/logs', auth, canManageGuild, (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
     publicSaveConfig(req.params.id, 'logs', req.body);
     res.json({ ok: true });
   });
 
-  app.post('/api/public/guild/:id/tickets/setup', (req, res) => {
+  app.post('/api/public/guild/:id/tickets/setup', auth, canManageGuild, async (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
     const d = req.body;
-    const cfg = db.get('ticketConfig', req.params.id, {});
-    if (d.channelId) cfg.panelChannel = d.channelId;
-    if (d.supportRoleId) cfg.supportRole = d.supportRoleId;
-    if (d.logChannelId) cfg.logChannel = d.logChannelId;
-    if (d.categoryId) cfg.ticketCategory = d.categoryId;
-    if (d.title) cfg.panelTitle = d.title;
-    if (d.description) cfg.panelDescription = d.description;
-    if (d.color) cfg.panelColor = d.color;
-    if (d.prefix) cfg.prefix = d.prefix;
-    if (d.maxTickets) cfg.maxPerUser = d.maxTickets;
-    if (d.welcomeMsg) cfg.welcomeMessage = d.welcomeMsg;
-    if (d.categories) cfg.categories = d.categories;
-    if (!cfg.categories) cfg.categories = [];
-    db.set('ticketConfig', req.params.id, cfg);
+    const current = await ticketDb.getConfig(req.params.id) || {};
+    const updated = { ...current };
+    if (d.channelId) updated.panelChannel = d.channelId;
+    if (d.supportRoleId) updated.supportRole = d.supportRoleId;
+    if (d.logChannelId) updated.logChannel = d.logChannelId;
+    if (d.categoryId) updated.ticketCategory = d.categoryId;
+    if (d.title) updated.panelTitle = d.title;
+    if (d.description) updated.panelDescription = d.description;
+    if (d.color) updated.panelColor = d.color;
+    if (d.prefix) updated.channelPrefix = d.prefix;
+    if (d.maxTickets) updated.maxPerUser = d.maxTickets;
+    if (d.welcomeMsg) updated.welcomeMessage = d.welcomeMsg;
+    if (d.ping !== undefined) updated.pingOnOpen = d.ping;
+    if (d.dmTranscript !== undefined) updated.dmTranscript = d.dmTranscript;
+    await ticketDb.saveConfig(req.params.id, updated);
     res.json({ ok: true });
   });
 
-  app.post('/api/public/guild/:id/protection', (req, res) => {
+  app.post('/api/public/guild/:id/protection', auth, canManageGuild, (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
     publicSaveConfig(req.params.id, 'protection', req.body);
     res.json({ ok: true });
   });
 
-  app.post('/api/public/guild/:id/levels', (req, res) => {
+  app.post('/api/public/guild/:id/levels', auth, canManageGuild, (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
     publicSaveConfig(req.params.id, 'levels', req.body);
     res.json({ ok: true });
   });
 
-  app.post('/api/public/guild/:id/economy', (req, res) => {
+  app.post('/api/public/guild/:id/economy', auth, canManageGuild, (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
     publicSaveConfig(req.params.id, 'economy', req.body);
@@ -407,34 +489,40 @@ module.exports = function startDashboard(client) {
   });
 
   // ── Public Action Endpoints ─────────────────────────────────────────────
-  app.post('/api/public/guild/:id/tickets/panel', async (req, res) => {
+  app.post('/api/public/guild/:id/tickets/panel', auth, canManageGuild, async (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
-    const cfg = db.get('ticketConfig', req.params.id, {});
+    const cfg = await ticketDb.getConfig(req.params.id) || {};
+    const categories = await ticketDb.getCategories(req.params.id);
+    cfg.categories = categories;
     const ch = guild.channels.cache.get(cfg.panelChannel);
     if (!ch) return res.status(400).json({ ok: false, msg: 'Canal de tickets no configurado. Configura el canal del panel primero.' });
     try {
       const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
       const embed = new EmbedBuilder()
         .setTitle(cfg.panelTitle || `🎫 Sistema de Soporte — ${guild.name}`)
-        .setDescription(cfg.panelDescription || cfg.panelDesc || 'Selecciona el tipo de ticket.')
+        .setDescription(cfg.panelDescription || 'Selecciona el tipo de ticket.')
         .setColor(cfg.panelColor || '#5865F2')
         .setFooter({ text: 'System 777 · Tickets' });
-      const cats = (cfg.categories || []).map(c => ({ label: c.label || c.name, value: c.id, emoji: c.emoji || '🎫', description: c.description || '' }));
+      const cats = (cfg.categories || []).map(c => ({ label: c.label || c.name, value: String(c.id), emoji: c.emoji || '🎫', description: c.description || '' }));
       if (cats.length === 0) cats.push({ label: 'General', value: 'general', emoji: '🎫', description: 'Soporte general' });
       const select = new StringSelectMenuBuilder()
         .setCustomId('tkt_select')
         .setPlaceholder('Selecciona una categoría...')
         .addOptions(cats);
       const row = new ActionRowBuilder().addComponents(select);
-      await ch.send({ embeds: [embed], components: [row] });
+      const msg = await ch.send({ embeds: [embed], components: [row] });
+      await ticketDb.saveConfig(req.params.id, { ...cfg, panelMessageId: msg.id });
+      try {
+        await ticketDb.logAction(req.params.id, null, null, 'panel_published', req.session.user.id, req.session.user.username, { channelId: ch.id, messageId: msg.id });
+      } catch (e) { console.error('[DASHBOARD] logAction error:', e.message); }
       res.json({ ok: true, msg: 'Panel enviado a ' + ch.name });
     } catch (e) {
       res.status(500).json({ ok: false, msg: 'Error: ' + e.message });
     }
   });
 
-  app.post('/api/public/guild/:id/verify/setup', async (req, res) => {
+  app.post('/api/public/guild/:id/verify/setup', auth, canManageGuild, async (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
     const { channelId, roleId, customMsg } = req.body;
@@ -461,208 +549,380 @@ module.exports = function startDashboard(client) {
     }
   });
 
-  app.post('/api/public/guild/:id/broadcast', async (req, res) => {
-    const { message } = req.body;
-    if (!message) return res.status(400).json({ ok: false, msg: 'Mensaje vacío' });
-    let count = 0;
-    for (const [, guild] of client.guilds.cache) {
-      const ch = guild.systemChannel || guild.channels.cache.find(c => c.isTextBased());
-      if (ch) { try { await ch.send(message); count++; } catch {} }
+  app.post('/api/public/guild/:id/broadcast', auth, ownerOnly, async (req, res) => {
+    const { message, channelId, embed, mention, target } = req.body;
+    if (!message && !embed) return res.status(400).json({ ok: false, msg: 'Mensaje vacío' });
+    const guild = client.guilds.cache.get(req.params.id);
+    if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
+
+    let ch;
+    if (channelId) {
+      ch = guild.channels.cache.get(channelId);
+      if (!ch) return res.status(400).json({ ok: false, msg: 'Canal no encontrado' });
+    } else {
+      ch = guild.systemChannel || guild.channels.cache.find(c => c.isTextBased());
     }
-    res.json({ ok: true, msg: `Mensaje enviado a ${count} servidores` });
+    if (!ch) return res.status(400).json({ ok: false, msg: 'No se encontró un canal válido' });
+
+    try {
+      const payload = {};
+      let content = message || '';
+      if (mention === '@everyone') content = `@everyone ${content}`;
+      else if (mention === '@here') content = `@here ${content}`;
+      if (content) payload.content = content;
+
+      if (embed) {
+        const { EmbedBuilder } = require('discord.js');
+        const e = new EmbedBuilder()
+          .setDescription(embed.description || message || '')
+          .setColor(embed.color || '#5865F2')
+          .setTimestamp();
+        if (embed.title) e.setTitle(embed.title);
+        if (embed.footer) e.setFooter({ text: embed.footer });
+        if (embed.author) e.setAuthor({ name: embed.author });
+        if (embed.thumbnail) e.setThumbnail(embed.thumbnail);
+        if (embed.image) e.setImage(embed.image);
+        if (embed.fields) e.addFields(embed.fields);
+        payload.embeds = [e];
+      }
+
+      await ch.send(payload);
+
+      // Log the activity
+      const logs = db.get('activityLogs', req.params.id, []);
+      if (!Array.isArray(logs)) db.set('activityLogs', req.params.id, []);
+      const logEntry = {
+        type: 'bot',
+        action: `Mensaje enviado en #${ch.name}`,
+        details: (message || '').slice(0, 200),
+        user: 'Dashboard',
+        timestamp: Date.now(),
+      };
+      const currentLogs = db.get('activityLogs', req.params.id, []);
+      const logsArr = Array.isArray(currentLogs) ? currentLogs : [];
+      logsArr.push(logEntry);
+      db.set('activityLogs', req.params.id, logsArr.slice(-500));
+
+      res.json({ ok: true, msg: `✅ Mensaje enviado en #${ch.name}` });
+    } catch (e) {
+      res.status(500).json({ ok: false, msg: 'Error: ' + e.message });
+    }
+  });
+
+  // ── Webhook endpoints ────────────────────────────────────────────────────
+  app.post('/api/public/guild/:id/webhooks', auth, canManageGuild, async (req, res) => {
+    const guild = client.guilds.cache.get(req.params.id);
+    if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
+    const { channelId, name, avatar } = req.body;
+    const ch = guild.channels.cache.get(channelId);
+    if (!ch) return res.status(400).json({ ok: false, msg: 'Canal no encontrado' });
+    try {
+      const webhook = await ch.createWebhook({ name: name || 'System 777', avatar: avatar || undefined });
+      res.json({ ok: true, webhook: { id: webhook.id, name: webhook.name, url: webhook.url } });
+    } catch (e) {
+      res.status(500).json({ ok: false, msg: 'Error creando webhook: ' + e.message });
+    }
+  });
+
+  app.get('/api/public/guild/:id/webhooks', async (req, res) => {
+    const guild = client.guilds.cache.get(req.params.id);
+    if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
+    try {
+      const webhooks = await guild.fetchWebhooks();
+      res.json({ ok: true, webhooks: webhooks.map(w => ({ id: w.id, name: w.name, channelId: w.channelId, url: w.url })) });
+    } catch (e) {
+      res.status(500).json({ ok: false, msg: e.message });
+    }
+  });
+
+  // ── Activity Logs endpoint ────────────────────────────────────────────────
+  app.get('/api/public/guild/:id/logs', (req, res) => {
+    const logs = db.get('activityLogs', req.params.id, []);
+    res.json({ ok: true, logs: Array.isArray(logs) ? logs.slice(-200).reverse() : [] });
+  });
+
+  // ── Slowmode endpoint ────────────────────────────────────────────────────
+  app.post('/api/public/guild/:id/slowmode', auth, canManageGuild, async (req, res) => {
+    const guild = client.guilds.cache.get(req.params.id);
+    if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
+    const { channelId, duration } = req.body;
+    const ch = guild.channels.cache.get(channelId);
+    if (!ch) return res.status(400).json({ ok: false, msg: 'Canal no encontrado' });
+    try {
+      await ch.setRateLimitPerUser(parseInt(duration) || 0);
+      res.json({ ok: true, msg: `Slowmode ${parseInt(duration) > 0 ? `configurado a ${duration}s` : 'desactivado'}` });
+    } catch (e) {
+      res.status(500).json({ ok: false, msg: e.message });
+    }
   });
 
   // ── Guild API ────────────────────────────────────────────────────────────
-  app.get('/api/guild/:id', auth, canManageGuild, (req, res) => {
-    const guild = client.guilds.cache.get(req.params.id);
-    if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
+  app.get('/api/guild/:id', auth, canManageGuild, async (req, res) => {
+    try {
+      const guild = client.guilds.cache.get(req.params.id);
+      if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
 
-    const config = db.get('guilds', req.params.id, {});
+      const config = db.get('guilds', req.params.id, {});
+      const ticketConfig = await ticketDb.getConfig(req.params.id) || {};
+      const ticketCategories = await ticketDb.getCategories(req.params.id);
+      ticketConfig.categories = ticketCategories;
 
-    const channels = [...guild.channels.cache.values()]
-      .filter(c => [0, 2, 4, 5].includes(c.type))
-      .sort((a, b) => (a.rawPosition ?? 0) - (b.rawPosition ?? 0))
-      .map(c => ({ id: c.id, name: c.name, type: c.type, parentId: c.parentId }));
+      const channels = [...guild.channels.cache.values()]
+        .filter(c => [0, 2, 4, 5].includes(c.type))
+        .sort((a, b) => (a.rawPosition ?? 0) - (b.rawPosition ?? 0))
+        .map(c => ({ id: c.id, name: c.name, type: c.type, parentId: c.parentId }));
 
-    const roles = [...guild.roles.cache.values()]
-      .filter(r => !r.managed && r.id !== guild.id)
-      .sort((a, b) => b.position - a.position)
-      .map(r => ({ id: r.id, name: r.name, color: r.hexColor }));
+      const roles = [...guild.roles.cache.values()]
+        .filter(r => !r.managed && r.id !== guild.id)
+        .sort((a, b) => b.position - a.position)
+        .map(r => ({ id: r.id, name: r.name, color: r.hexColor }));
 
-    const categories = [...guild.channels.cache.values()]
-      .filter(c => c.type === 4)
-      .sort((a, b) => (a.rawPosition ?? 0) - (b.rawPosition ?? 0))
-      .map(c => ({ id: c.id, name: c.name }));
+      const categories = [...guild.channels.cache.values()]
+        .filter(c => c.type === 4)
+        .sort((a, b) => (a.rawPosition ?? 0) - (b.rawPosition ?? 0))
+        .map(c => ({ id: c.id, name: c.name }));
 
-    res.json({
-      ok: true, config, ticketConfig, channels, roles, categories,
-      guild: {
-        id: guild.id, name: guild.name, icon: guild.iconURL(),
-        memberCount: guild.memberCount, ownerId: guild.ownerId,
-        channelCount: guild.channels.cache.size,
-        roleCount:    guild.roles.cache.size,
-      },
-    });
+      res.json({
+        ok: true, config, ticketConfig, channels, roles, categories,
+        guild: {
+          id: guild.id, name: guild.name, icon: guild.iconURL(),
+          memberCount: guild.memberCount, ownerId: guild.ownerId,
+          channelCount: guild.channels.cache.size,
+          roleCount:    guild.roles.cache.size,
+        },
+      });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] GET /api/guild/:id:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
-  // ── Guild API ────────────────────────────────────────────────────────────
-  app.get('/api/guild/:id', auth, canManageGuild, (req, res) => {
-    const guild = client.guilds.cache.get(req.params.id);
-    if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
-
-    const config = db.get('guilds', req.params.id, {});
-    config.ticketCfg = {
-      ...(config.ticketCfg || {}),
-      panelChannel, supportRole, logChannel, discordCategory,
-      panelTitle, panelDesc, color, panelImage,
-      channelPrefix, max, ping, dm_transcript, welcome_msg,
-      ...(Array.isArray(categories) ? { categories } : {}),
-    };
-    db.set('guilds', req.params.id, config);
-    res.json({ ok: true });
-  });
-
-  // ── Ticket: post panel ──────────────────────────────────────────────────────
   app.post('/api/guild/:id/tickets/panel', auth, canManageGuild, async (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en el servidor' });
 
-    const config = db.get('guilds', req.params.id, {});
-    const cfg = config.ticketCfg || {};
+    const cfg = await ticketDb.getConfig(req.params.id) || {};
+    const categories = await ticketDb.getCategories(req.params.id);
+    cfg.categories = categories;
     if (!cfg.panelChannel) return res.status(400).json({ ok: false, msg: 'Configura el canal del panel primero' });
 
     const channel = guild.channels.cache.get(cfg.panelChannel);
     if (!channel) return res.status(404).json({ ok: false, msg: 'Canal no encontrado' });
 
     try {
-      const tkt = require('../src/systems/ticketSystem');
-      const { embeds, components } = tkt.buildPanel(cfg, guild);
-      await channel.send({ embeds, components });
+      const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
+      const embed = new EmbedBuilder()
+        .setTitle(cfg.panelTitle || `🎫 Sistema de Soporte — ${guild.name}`)
+        .setDescription(cfg.panelDescription || 'Selecciona el tipo de ticket.')
+        .setColor(cfg.panelColor || '#5865F2')
+        .setFooter({ text: 'System 777 · Tickets' });
+      const cats = (cfg.categories || []).map(c => ({ label: c.label || c.name, value: String(c.id), emoji: c.emoji || '🎫', description: c.description || '' }));
+      if (cats.length === 0) cats.push({ label: 'General', value: 'general', emoji: '🎫', description: 'Soporte general' });
+      const select = new StringSelectMenuBuilder()
+        .setCustomId('tkt_select')
+        .setPlaceholder('Selecciona una categoría...')
+        .addOptions(cats);
+      const row = new ActionRowBuilder().addComponents(select);
+      const msg = await channel.send({ embeds: [embed], components: [row] });
+      await ticketDb.saveConfig(req.params.id, { ...cfg, panelMessageId: msg.id });
+      try {
+        await ticketDb.logAction(req.params.id, null, null, 'panel_published', req.session.user.id, req.session.user.username, { channelId: channel.id, messageId: msg.id });
+      } catch (e) { console.error('[DASHBOARD] logAction error:', e.message); }
       res.json({ ok: true, msg: `✅ Panel enviado a #${channel.name}` });
     } catch (e) {
       res.status(500).json({ ok: false, msg: e.message });
     }
   });
 
-  // ── Ticket: add/update category ─────────────────────────────────────────────
-  app.post('/api/guild/:id/tickets/category', auth, canManageGuild, (req, res) => {
-    const { id: catId, label, emoji, description } = req.body;
-    if (!catId || !label || !emoji || !description)
-      return res.status(400).json({ ok: false, msg: 'Faltan campos (id, label, emoji, description)' });
+  app.post('/api/guild/:id/tickets/category', auth, canManageGuild, async (req, res) => {
+    try {
+      const { id: catId, label, emoji, description } = req.body;
+      if (!catId || !label || !emoji || !description)
+        return res.status(400).json({ ok: false, msg: 'Faltan campos (id, label, emoji, description)' });
 
-    const config = db.get('guilds', req.params.id, {});
-    if (!config.ticketCfg) config.ticketCfg = {};
-    if (!Array.isArray(config.ticketCfg.categories)) config.ticketCfg.categories = [];
-
-    const idx = config.ticketCfg.categories.findIndex(c => c.id === catId);
-    const cat = { id: catId, label, emoji, description };
-    if (idx >= 0) config.ticketCfg.categories[idx] = cat;
-    else config.ticketCfg.categories.push(cat);
-
-    db.set('guilds', req.params.id, config);
-    res.json({ ok: true, categories: config.ticketCfg.categories });
+      const categories = await ticketDb.getCategories(req.params.id);
+      const existing = categories.find(c => c.categoryId === catId || String(c.id) === String(catId));
+      if (existing) {
+        await ticketDb.updateCategory(existing.id, { categoryId: catId, label, emoji, description });
+        try {
+          await ticketDb.logAction(req.params.id, null, null, 'category_updated', req.session.user.id, req.session.user.username, { categoryId: catId, label });
+        } catch (e) { console.error('[DASHBOARD] logAction error:', e.message); }
+      } else {
+        await ticketDb.addCategory(req.params.id, { categoryId: catId, label, emoji, description });
+        try {
+          await ticketDb.logAction(req.params.id, null, null, 'category_added', req.session.user.id, req.session.user.username, { categoryId: catId, label });
+        } catch (e) { console.error('[DASHBOARD] logAction error:', e.message); }
+      }
+      const updatedCategories = await ticketDb.getCategories(req.params.id);
+      res.json({ ok: true, categories: updatedCategories });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/guild/:id/tickets/category:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
-  // ── Ticket: delete category ─────────────────────────────────────────────────
-  app.delete('/api/guild/:id/tickets/category/:catId', auth, canManageGuild, (req, res) => {
-    const config = db.get('guilds', req.params.id, {});
-    if (config.ticketCfg?.categories) {
-      config.ticketCfg.categories = config.ticketCfg.categories.filter(c => c.id !== req.params.catId);
-      db.set('guilds', req.params.id, config);
+  app.delete('/api/guild/:id/tickets/category/:catId', auth, canManageGuild, async (req, res) => {
+    try {
+      await ticketDb.deleteCategory(req.params.catId);
+      try {
+        await ticketDb.logAction(req.params.id, null, null, 'category_deleted', req.session.user.id, req.session.user.username, { categoryId: req.params.catId });
+      } catch (e) { console.error('[DASHBOARD] logAction error:', e.message); }
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] DELETE /api/guild/:id/tickets/category/:catId:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
     }
-    res.json({ ok: true });
   });
 
-  // ── Ticket: update config options ───────────────────────────────────────────
-  app.put('/api/guild/:id/tickets/config', auth, canManageGuild, (req, res) => {
-    const config = db.get('guilds', req.params.id, {});
-    if (!config.ticketCfg) config.ticketCfg = {};
-    const allowed = ['color','ping','max','dm_transcript','welcome_msg','auto_close','extra_role','channelPrefix'];
-    for (const [k, v] of Object.entries(req.body)) {
-      if (allowed.includes(k)) config.ticketCfg[k] = v;
+  app.put('/api/guild/:id/tickets/config', auth, canManageGuild, async (req, res) => {
+    try {
+      const current = await ticketDb.getConfig(req.params.id) || {};
+      const fieldMap = {
+        color: 'panelColor',
+        ping: 'pingOnOpen',
+        max: 'maxPerUser',
+        dm_transcript: 'dmTranscript',
+        welcome_msg: 'welcomeMessage',
+        auto_close: 'autoCloseMinutes',
+        channelPrefix: 'channelPrefix',
+      };
+      const updates = {};
+      for (const [k, v] of Object.entries(req.body)) {
+        const mapped = fieldMap[k] || k;
+        updates[mapped] = v;
+      }
+      const updated = { ...current, ...updates };
+      await ticketDb.saveConfig(req.params.id, updated);
+      res.json({ ok: true, ticketCfg: updated });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] PUT /api/guild/:id/tickets/config:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
     }
-    db.set('guilds', req.params.id, config);
-    res.json({ ok: true, ticketCfg: config.ticketCfg });
   });
 
   // ── Welcome config ──────────────────────────────────────────────────────────
   app.post('/api/guild/:id/welcome', auth, canManageGuild, (req, res) => {
-    const config = db.get('guilds', req.params.id, {});
-    config.welcome = { ...(config.welcome || {}), ...req.body };
-    db.set('guilds', req.params.id, config);
-    res.json({ ok: true });
+    try {
+      const config = db.get('guilds', req.params.id, {});
+      config.welcome = { ...(config.welcome || {}), ...req.body };
+      db.set('guilds', req.params.id, config);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/guild/:id/welcome:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   // ── Goodbye config ──────────────────────────────────────────────────────────
   app.post('/api/guild/:id/goodbye', auth, canManageGuild, (req, res) => {
-    const config = db.get('guilds', req.params.id, {});
-    config.goodbye = { ...(config.goodbye || {}), ...req.body };
-    db.set('guilds', req.params.id, config);
-    res.json({ ok: true });
+    try {
+      const config = db.get('guilds', req.params.id, {});
+      config.goodbye = { ...(config.goodbye || {}), ...req.body };
+      db.set('guilds', req.params.id, config);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/guild/:id/goodbye:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   // ── Autorole config ─────────────────────────────────────────────────────────
   app.post('/api/guild/:id/autorole', auth, canManageGuild, (req, res) => {
-    const config = db.get('guilds', req.params.id, {});
-    config.autorole = req.body.roleId || null;
-    db.set('guilds', req.params.id, config);
-    res.json({ ok: true });
+    try {
+      const config = db.get('guilds', req.params.id, {});
+      config.autorole = req.body.roleId || null;
+      db.set('guilds', req.params.id, config);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/guild/:id/autorole:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   // ── Logs config ─────────────────────────────────────────────────────────────
   app.post('/api/guild/:id/logs', auth, canManageGuild, (req, res) => {
-    const config = db.get('guilds', req.params.id, {});
-    config.logChannels = { ...(config.logChannels || {}), ...req.body };
-    db.set('guilds', req.params.id, config);
-    res.json({ ok: true });
+    try {
+      const config = db.get('guilds', req.params.id, {});
+      config.logChannels = { ...(config.logChannels || {}), ...req.body };
+      db.set('guilds', req.params.id, config);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/guild/:id/logs:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   // ── Protection config ────────────────────────────────────────────────────────
   app.post('/api/guild/:id/protection', auth, canManageGuild, (req, res) => {
-    const config = db.get('guilds', req.params.id, {});
-    config.protection = req.body;
-    db.set('guilds', req.params.id, config);
-    res.json({ ok: true });
+    try {
+      const config = db.get('guilds', req.params.id, {});
+      config.protection = req.body;
+      db.set('guilds', req.params.id, config);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/guild/:id/protection:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   // ── Levels config ────────────────────────────────────────────────────────────
   app.post('/api/guild/:id/levels', auth, canManageGuild, (req, res) => {
-    const config = db.get('guilds', req.params.id, {});
-    config.levelsConfig = req.body;
-    db.set('guilds', req.params.id, config);
-    res.json({ ok: true });
+    try {
+      const config = db.get('guilds', req.params.id, {});
+      config.levelsConfig = req.body;
+      db.set('guilds', req.params.id, config);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/guild/:id/levels:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   app.get('/api/guild/:id/levels/top', auth, canManageGuild, (req, res) => {
-    const gid = req.params.id;
-    const all = db.all('levels');
-    const prefix = `${gid}_`;
-    const entries = Object.entries(all)
-      .filter(([k]) => k.startsWith(prefix))
-      .map(([k, v]) => ({ userId: k.replace(prefix, ''), level: v.level || 0, xp: v.xp || 0 }))
-      .sort((a, b) => b.level - a.level || b.xp - a.xp)
-      .slice(0, 10);
-    res.json({ ok: true, top: entries });
+    try {
+      const gid = req.params.id;
+      const all = db.all('levels');
+      const prefix = `${gid}_`;
+      const entries = Object.entries(all)
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([k, v]) => ({ userId: k.replace(prefix, ''), level: v.level || 0, xp: v.xp || 0 }))
+        .sort((a, b) => b.level - a.level || b.xp - a.xp)
+        .slice(0, 10);
+      res.json({ ok: true, top: entries });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] GET /api/guild/:id/levels/top:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   // ── Economy config ───────────────────────────────────────────────────────────
   app.post('/api/guild/:id/economy', auth, canManageGuild, (req, res) => {
-    const config = db.get('guilds', req.params.id, {});
-    config.economyConfig = req.body;
-    db.set('guilds', req.params.id, config);
-    res.json({ ok: true });
+    try {
+      const config = db.get('guilds', req.params.id, {});
+      config.economyConfig = req.body;
+      db.set('guilds', req.params.id, config);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/guild/:id/economy:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   app.get('/api/guild/:id/economy/top', auth, canManageGuild, (req, res) => {
-    const gid = req.params.id;
-    const all = db.all('economy');
-    const prefix = `${gid}_`;
-    const entries = Object.entries(all)
-      .filter(([k]) => k.startsWith(prefix))
-      .map(([k, v]) => ({ userId: k.replace(prefix, ''), balance: (v.balance || 0) + (v.bank || 0) }))
-      .sort((a, b) => b.balance - a.balance)
-      .slice(0, 10);
-    res.json({ ok: true, top: entries });
+    try {
+      const gid = req.params.id;
+      const all = db.all('economy');
+      const prefix = `${gid}_`;
+      const entries = Object.entries(all)
+        .filter(([k]) => k.startsWith(prefix))
+        .map(([k, v]) => ({ userId: k.replace(prefix, ''), balance: (v.balance || 0) + (v.bank || 0) }))
+        .sort((a, b) => b.balance - a.balance)
+        .slice(0, 10);
+      res.json({ ok: true, top: entries });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] GET /api/guild/:id/economy/top:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   // ── Quick mod action ─────────────────────────────────────────────────────────
@@ -695,10 +955,76 @@ module.exports = function startDashboard(client) {
     } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
   });
 
-  // ── Tickets: list open tickets in guild ─────────────────────────────────────
-  app.get('/api/guild/:id/tickets/list', auth, canManageGuild, (req, res) => {
-    const tickets = db.get('tickets', req.params.id, {});
-    res.json({ ok: true, tickets });
+  app.get('/api/guild/:id/tickets/list', auth, canManageGuild, async (req, res) => {
+    try {
+      const tickets = await ticketDb.getOpenTickets(req.params.id);
+      res.json({ ok: true, tickets });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] GET /api/guild/:id/tickets/list:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
+  });
+
+  app.get('/api/guild/:id/tickets/logs', auth, canManageGuild, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit) || 50;
+      const offset = parseInt(req.query.offset) || 0;
+      const logs = await ticketDb.getLogs(req.params.id, limit, offset);
+      res.json({ ok: true, logs });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] GET /api/guild/:id/tickets/logs:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
+  });
+
+  app.get('/api/guild/:id/tickets/logs/:ticketId', auth, canManageGuild, async (req, res) => {
+    try {
+      const logs = await ticketDb.getTicketLogs(parseInt(req.params.ticketId));
+      res.json({ ok: true, logs });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] GET /api/guild/:id/tickets/logs/:ticketId:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
+  });
+
+  // ── Activity Logs ────────────────────────────────────────────────────────────
+  app.get('/api/public/guild/:id/activity-logs', (req, res) => {
+    const logs = db.get('activityLogs', req.params.id, []);
+    res.json({ ok: true, logs: Array.isArray(logs) ? logs.slice(-200).reverse() : [] });
+  });
+
+  app.get('/api/guild/:id/activity-logs', auth, canManageGuild, (req, res) => {
+    const logs = db.get('activityLogs', req.params.id, []);
+    res.json({ ok: true, logs: Array.isArray(logs) ? logs.slice(-200).reverse() : [] });
+  });
+
+  // ── Role Management ──────────────────────────────────────────────────────────
+  app.get('/api/public/guild/:id/roles', (req, res) => {
+    const guild = client.guilds.cache.get(req.params.id);
+    if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
+    const roles = [...guild.roles.cache.values()]
+      .filter(r => !r.managed && r.id !== guild.id)
+      .sort((a, b) => (b.rawPosition ?? 0) - (a.rawPosition ?? 0))
+      .map(r => ({
+        id: r.id, name: r.name, color: r.hexColor, position: r.rawPosition,
+        memberCount: r.members.size,
+        permissions: r.permissions.toArray(),
+      }));
+    res.json({ ok: true, roles });
+  });
+
+  app.get('/api/guild/:id/roles', auth, canManageGuild, (req, res) => {
+    const guild = client.guilds.cache.get(req.params.id);
+    if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
+    const roles = [...guild.roles.cache.values()]
+      .filter(r => !r.managed && r.id !== guild.id)
+      .sort((a, b) => (b.rawPosition ?? 0) - (a.rawPosition ?? 0))
+      .map(r => ({
+        id: r.id, name: r.name, color: r.hexColor, position: r.rawPosition,
+        memberCount: r.members.size,
+        permissions: r.permissions.toArray(),
+      }));
+    res.json({ ok: true, roles });
   });
 
   // ── Owner: Bot power control ────────────────────────────────────────────────
@@ -934,34 +1260,54 @@ module.exports = function startDashboard(client) {
   });
 
   app.post('/api/premium/grant', auth, ownerOnly, express.json(), (req, res) => {
-    const { userId, plan, days } = req.body;
-    if (!userId || !plan) return res.status(400).json({ ok: false, error: 'Missing userId or plan' });
-    const prem = require('../src/systems/premium');
-    const data = prem.grant(userId, plan, days ?? 30, req.session.user.id);
-    res.json({ ok: true, data });
+    try {
+      const { userId, plan, days } = req.body;
+      if (!userId || !plan) return res.status(400).json({ ok: false, error: 'Missing userId or plan' });
+      const prem = require('../src/systems/premium');
+      const data = prem.grant(userId, plan, days ?? 30, req.session.user.id);
+      res.json({ ok: true, data });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/premium/grant:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   app.post('/api/premium/revoke', auth, ownerOnly, express.json(), (req, res) => {
-    const { userId } = req.body;
-    if (!userId) return res.status(400).json({ ok: false, error: 'Missing userId' });
-    const prem = require('../src/systems/premium');
-    const ok   = prem.revoke(userId, req.session.user.id);
-    res.json({ ok });
+    try {
+      const { userId } = req.body;
+      if (!userId) return res.status(400).json({ ok: false, error: 'Missing userId' });
+      const prem = require('../src/systems/premium');
+      const ok   = prem.revoke(userId, req.session.user.id);
+      res.json({ ok });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/premium/revoke:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   app.post('/api/premium/request/:id/approve', auth, ownerOnly, express.json(), (req, res) => {
-    const prem = require('../src/systems/premium');
-    const req_ = prem.resolveRequest(req.params.id, 'approved', req.session.user.id, 'Approved via dashboard');
-    if (!req_) return res.status(404).json({ ok: false, error: 'Request not found' });
-    prem.grant(req_.userId, req_.plan, req.body.days ?? 30, req.session.user.id);
-    res.json({ ok: true, request: req_ });
+    try {
+      const prem = require('../src/systems/premium');
+      const req_ = prem.resolveRequest(req.params.id, 'approved', req.session.user.id, 'Approved via dashboard');
+      if (!req_) return res.status(404).json({ ok: false, error: 'Request not found' });
+      prem.grant(req_.userId, req_.plan, req.body.days ?? 30, req.session.user.id);
+      res.json({ ok: true, request: req_ });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/premium/request/:id/approve:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   app.post('/api/premium/request/:id/deny', auth, ownerOnly, express.json(), (req, res) => {
-    const prem = require('../src/systems/premium');
-    const req_ = prem.resolveRequest(req.params.id, 'denied', req.session.user.id, req.body.reason || '');
-    if (!req_) return res.status(404).json({ ok: false, error: 'Request not found' });
-    res.json({ ok: true, request: req_ });
+    try {
+      const prem = require('../src/systems/premium');
+      const req_ = prem.resolveRequest(req.params.id, 'denied', req.session.user.id, req.body.reason || '');
+      if (!req_) return res.status(404).json({ ok: false, error: 'Request not found' });
+      res.json({ ok: true, request: req_ });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/premium/request/:id/deny:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   app.get('/api/premium/codes', auth, ownerOnly, (req, res) => {
@@ -970,11 +1316,16 @@ module.exports = function startDashboard(client) {
   });
 
   app.post('/api/premium/codes/generate', auth, ownerOnly, express.json(), (req, res) => {
-    const { plan, days, uses } = req.body;
-    if (!plan || !days) return res.status(400).json({ ok: false, error: 'Missing plan or days' });
-    const prem = require('../src/systems/premium');
-    const code = prem.generateCode(plan, days, req.session.user.id, uses ?? 1);
-    res.json({ ok: true, code });
+    try {
+      const { plan, days, uses } = req.body;
+      if (!plan || !days) return res.status(400).json({ ok: false, error: 'Missing plan or days' });
+      const prem = require('../src/systems/premium');
+      const code = prem.generateCode(plan, days, req.session.user.id, uses ?? 1);
+      res.json({ ok: true, code });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/premium/codes/generate:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   app.get('/api/premium/history', auth, ownerOnly, (req, res) => {
@@ -1104,63 +1455,93 @@ module.exports = function startDashboard(client) {
   });
 
   app.post('/api/notifications/youtube', (req, res) => {
-    const { channelId, guildId, discordChannelId, roleId, message, color } = req.body;
-    if (!channelId || !discordChannelId) return res.status(400).json({ ok: false, msg: 'channelId y discordChannelId requeridos' });
-    const cfg = notifications.getConfig();
-    if (!cfg.youtube) cfg.youtube = [];
-    const idx = cfg.youtube.findIndex(s => s.channelId === channelId && s.guildId === guildId);
-    const sub = { channelId, guildId, discordChannelId, roleId: roleId || '', message: message || '', color: color || '#FF0000', lastVideoId: '' };
-    if (idx >= 0) cfg.youtube[idx] = { ...cfg.youtube[idx], ...sub };
-    else cfg.youtube.push(sub);
-    notifications.saveConfig(cfg);
-    res.json({ ok: true });
+    try {
+      const { channelId, guildId, discordChannelId, roleId, message, color } = req.body;
+      if (!channelId || !discordChannelId) return res.status(400).json({ ok: false, msg: 'channelId y discordChannelId requeridos' });
+      const cfg = notifications.getConfig();
+      if (!cfg.youtube) cfg.youtube = [];
+      const idx = cfg.youtube.findIndex(s => s.channelId === channelId && s.guildId === guildId);
+      const sub = { channelId, guildId, discordChannelId, roleId: roleId || '', message: message || '', color: color || '#FF0000', lastVideoId: '' };
+      if (idx >= 0) cfg.youtube[idx] = { ...cfg.youtube[idx], ...sub };
+      else cfg.youtube.push(sub);
+      notifications.saveConfig(cfg);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/notifications/youtube:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   app.delete('/api/notifications/youtube/:channelId', (req, res) => {
-    const cfg = notifications.getConfig();
-    cfg.youtube = (cfg.youtube || []).filter(s => s.channelId !== req.params.channelId);
-    notifications.saveConfig(cfg);
-    res.json({ ok: true });
+    try {
+      const cfg = notifications.getConfig();
+      cfg.youtube = (cfg.youtube || []).filter(s => s.channelId !== req.params.channelId);
+      notifications.saveConfig(cfg);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] DELETE /api/notifications/youtube/:channelId:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   app.post('/api/notifications/kick', (req, res) => {
-    const { username, guildId, discordChannelId, roleId, message, color } = req.body;
-    if (!username || !discordChannelId) return res.status(400).json({ ok: false, msg: 'username y discordChannelId requeridos' });
-    const cfg = notifications.getConfig();
-    if (!cfg.kick) cfg.kick = [];
-    const idx = cfg.kick.findIndex(s => s.username === username && s.guildId === guildId);
-    const sub = { username, guildId, discordChannelId, roleId: roleId || '', message: message || '', color: color || '#53FC18', isLive: false };
-    if (idx >= 0) cfg.kick[idx] = { ...cfg.kick[idx], ...sub };
-    else cfg.kick.push(sub);
-    notifications.saveConfig(cfg);
-    res.json({ ok: true });
+    try {
+      const { username, guildId, discordChannelId, roleId, message, color } = req.body;
+      if (!username || !discordChannelId) return res.status(400).json({ ok: false, msg: 'username y discordChannelId requeridos' });
+      const cfg = notifications.getConfig();
+      if (!cfg.kick) cfg.kick = [];
+      const idx = cfg.kick.findIndex(s => s.username === username && s.guildId === guildId);
+      const sub = { username, guildId, discordChannelId, roleId: roleId || '', message: message || '', color: color || '#53FC18', isLive: false };
+      if (idx >= 0) cfg.kick[idx] = { ...cfg.kick[idx], ...sub };
+      else cfg.kick.push(sub);
+      notifications.saveConfig(cfg);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/notifications/kick:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   app.delete('/api/notifications/kick/:username', (req, res) => {
-    const cfg = notifications.getConfig();
-    cfg.kick = (cfg.kick || []).filter(s => s.username !== req.params.username);
-    notifications.saveConfig(cfg);
-    res.json({ ok: true });
+    try {
+      const cfg = notifications.getConfig();
+      cfg.kick = (cfg.kick || []).filter(s => s.username !== req.params.username);
+      notifications.saveConfig(cfg);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] DELETE /api/notifications/kick/:username:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   app.post('/api/notifications/tiktok', (req, res) => {
-    const { username, guildId, discordChannelId, roleId, message, color } = req.body;
-    if (!username || !discordChannelId) return res.status(400).json({ ok: false, msg: 'username y discordChannelId requeridos' });
-    const cfg = notifications.getConfig();
-    if (!cfg.tiktok) cfg.tiktok = [];
-    const idx = cfg.tiktok.findIndex(s => s.username === username && s.guildId === guildId);
-    const sub = { username, guildId, discordChannelId, roleId: roleId || '', message: message || '', color: color || '#000000', lastVideoId: '' };
-    if (idx >= 0) cfg.tiktok[idx] = { ...cfg.tiktok[idx], ...sub };
-    else cfg.tiktok.push(sub);
-    notifications.saveConfig(cfg);
-    res.json({ ok: true });
+    try {
+      const { username, guildId, discordChannelId, roleId, message, color } = req.body;
+      if (!username || !discordChannelId) return res.status(400).json({ ok: false, msg: 'username y discordChannelId requeridos' });
+      const cfg = notifications.getConfig();
+      if (!cfg.tiktok) cfg.tiktok = [];
+      const idx = cfg.tiktok.findIndex(s => s.username === username && s.guildId === guildId);
+      const sub = { username, guildId, discordChannelId, roleId: roleId || '', message: message || '', color: color || '#000000', lastVideoId: '' };
+      if (idx >= 0) cfg.tiktok[idx] = { ...cfg.tiktok[idx], ...sub };
+      else cfg.tiktok.push(sub);
+      notifications.saveConfig(cfg);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/notifications/tiktok:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   app.delete('/api/notifications/tiktok/:username', (req, res) => {
-    const cfg = notifications.getConfig();
-    cfg.tiktok = (cfg.tiktok || []).filter(s => s.username !== req.params.username);
-    notifications.saveConfig(cfg);
-    res.json({ ok: true });
+    try {
+      const cfg = notifications.getConfig();
+      cfg.tiktok = (cfg.tiktok || []).filter(s => s.username !== req.params.username);
+      notifications.saveConfig(cfg);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] DELETE /api/notifications/tiktok/:username:', error);
+      res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
   });
 
   app.post('/api/notifications/check', async (req, res) => {
@@ -1238,25 +1619,22 @@ module.exports = function startDashboard(client) {
       const user   = await discordGet('/users/@me', tokens.access_token);
       const userId = user.id;
 
-      // IP ↔ userId
-      let isNew = false;
-      const reg = db.get('ip_registry', 'data', {});
-      if (!reg[ip]) reg[ip] = [];
-      if (!reg[ip].includes(userId)) { reg[ip].push(userId); db.set('ip_registry', 'data', reg); isNew = true; }
-      const uips = db.get('ip_registry', 'user_ips', {});
-      if (!uips[userId]) uips[userId] = [];
-      if (!uips[userId].includes(ip)) { uips[userId].push(ip); db.set('ip_registry', 'user_ips', uips); isNew = true; }
+      // IP ↔ userId (usando ipBan module)
+      const ipResult = await ipBan.registerIp(userId, ip, 'verify');
 
       // IP baneada → banear y bloquear
-      const bannedIps = db.get('ip_registry', 'banned_ips', {});
-      if (bannedIps[ip]) {
+      if (ipResult.banned) {
         if (guildId) {
           const guild  = client.guilds.cache.get(guildId);
           const member = guild ? await guild.members.fetch(userId).catch(() => null) : null;
-          if (member) await member.ban({ reason: `System 777 · IP Baneada: ${bannedIps[ip].reason}` }).catch(() => {});
+          if (member) await member.ban({ reason: `System 777 · IP Baneada: ${ipResult.ban.reason}` }).catch(() => {});
         }
         return res.send(verifyPage('⛔ IP Bloqueada', 'Tu dirección IP está bloqueada permanentemente del sistema.', '#ff4444'));
       }
+
+      // Verificar si el usuario ya tenía IPs (para saber si es nuevo)
+      const prevIps = (db.get('ip_registry', 'user_ips', {})[userId] || []).length;
+      const isNew = prevIps <= 1;
 
       // Dar rol si está configurado
       if (guildId) {
@@ -1325,19 +1703,13 @@ module.exports = function startDashboard(client) {
     if (!ip || ip === 'unknown' || !userId || userId.length < 10) return;
     setImmediate(async () => {
       try {
-        let isNew = false;
-        const reg = db.get('ip_registry', 'data', {});
-        if (!reg[ip]) reg[ip] = [];
-        if (!reg[ip].includes(userId)) { reg[ip].push(userId); db.set('ip_registry', 'data', reg); isNew = true; }
+        const prevIps = (db.get('ip_registry', 'user_ips', {})[userId] || []).length;
+        const result  = await ipBan.registerIp(userId, ip, 'tracking');
+        const isNew   = prevIps === 0;
 
-        const uips = db.get('ip_registry', 'user_ips', {});
-        if (!uips[userId]) uips[userId] = [];
-        if (!uips[userId].includes(ip)) { uips[userId].push(ip); db.set('ip_registry', 'user_ips', uips); isNew = true; }
-
-        const bannedIps = db.get('ip_registry', 'banned_ips', {});
-        const guild     = client.guilds.cache.get(guildId);
-        if (bannedIps[ip] && guild) {
-          guild.members.ban(userId, { reason: `System 777 · IP Baneada: ${bannedIps[ip].reason}` }).catch(() => {});
+        const guild = client.guilds.cache.get(guildId);
+        if (result.banned && guild) {
+          guild.members.ban(userId, { reason: `System 777 · IP Baneada: ${result.ban.reason}` }).catch(() => {});
         }
 
         if (isNew && process.env.OWNER_ID) {
@@ -1353,11 +1725,12 @@ module.exports = function startDashboard(client) {
 
           const allIps = (db.get('ip_registry', 'user_ips', {}))[userId] || [];
           const others = (db.get('ip_registry', 'data', {}))[ip]?.filter(id => id !== userId) || [];
+          const loc    = result.lookup ? ` · ${result.lookup.city || ''}, ${result.lookup.country || ''} · ISP: ${result.lookup.isp || ''}` : '';
 
           await owner.send(
             `🌐 **IP Capturada** — ${guildName}\n` +
             `👤 **Cuenta:** ${userMention}\n` +
-            `🔑 **IP:** \`${ip}\`\n` +
+            `🔑 **IP:** \`${ip}\`${loc}\n` +
             `${device}\n` +
             (others.length ? `⚠️ **Misma IP usada por:** ${others.map(id => `\`${id}\``).join(', ')}\n` : '') +
             `📋 IPs totales del usuario: **${allIps.length}**`
@@ -1376,58 +1749,58 @@ h1{font-size:2em}p{color:#aaa;font-size:1.1em}footer{position:fixed;bottom:16px;
 
   // ── IP Ban API (owner) ─────────────────────────────────────────────────────
   app.get('/api/ipban', auth, ownerOnly, (req, res) => {
-    res.json({ ok: true, bannedIps: db.get('ip_registry', 'banned_ips', {}) });
+    const banned = ipBan.getBannedIps();
+    res.json({ ok: true, bannedIps: banned, stats: ipBan.getStats() });
   });
 
   app.post('/api/ipban', auth, ownerOnly, async (req, res) => {
-    const { ip, reason, guildId } = req.body; // guildId opcional: solo banear en ese server
+    const { ip, reason, guildId } = req.body;
     if (!ip || !reason) return res.status(400).json({ ok: false, msg: 'Falta ip o reason' });
 
-    const reg       = db.get('ip_registry', 'data', {});
-    const usersOnIp = reg[ip] || [];
-    let count = 0;
+    // Lookup de la IP para info de ubicación
+    const lookup = await ipBan.lookupIp(ip).catch(() => null);
 
     if (guildId) {
-      // ── Ban solo en un servidor específico ────────────────────
+      // Ban solo en un servidor específico
       const guild = client.guilds.cache.get(guildId);
       if (!guild) return res.status(404).json({ ok: false, msg: 'Servidor no encontrado' });
+      const reg = db.get('ip_registry', 'data', {});
+      const usersOnIp = reg[ip] || [];
+      let count = 0;
       for (const userId of usersOnIp) {
         try { await guild.bans.create(userId, { reason: `System 777 · IP Ban (${ip}): ${reason}` }); count++; } catch {}
       }
-      res.json({ ok: true, ip, guildId, guildName: guild.name, usersFound: usersOnIp.length, bansApplied: count, scope: 'server' });
+      ipBan.banIp(ip, reason, req.session.user.id);
+      res.json({ ok: true, ip, lookup, guildId, guildName: guild.name, usersFound: usersOnIp.length, bansApplied: count, scope: 'server' });
     } else {
-      // ── Ban global en todos los servidores ────────────────────
-      const bannedIps = db.get('ip_registry', 'banned_ips', {});
-      bannedIps[ip] = { reason, ts: Date.now(), bannedBy: req.session.user.id };
-      db.set('ip_registry', 'banned_ips', bannedIps);
-
-      const gbans = db.get('globalbans', 'users', {});
-      for (const userId of usersOnIp) {
-        gbans[userId] = { reason: `IP Ban (${ip}): ${reason}`, bannedBy: 'system', ts: Date.now(), permanent: true };
-        for (const guild of client.guilds.cache.values()) {
-          try { await guild.bans.create(userId, { reason: `System 777 · IP Ban Global: ${reason}` }); count++; } catch {}
-        }
-      }
-      if (usersOnIp.length) db.set('globalbans', 'users', gbans);
-      res.json({ ok: true, ip, usersFound: usersOnIp.length, guildBansApplied: count, scope: 'global' });
+      // Ban global
+      const result = await ipBan.autoBanIp(ip, reason, req.session.user.id, client);
+      res.json({ ok: true, ip, lookup, usersAffected: result.usersAffected, guildBansApplied: result.totalGuildBans, scope: 'global' });
     }
   });
 
-  app.delete('/api/ipban/:ip', auth, ownerOnly, (req, res) => {
-    const ip        = decodeURIComponent(req.params.ip);
-    const bannedIps = db.get('ip_registry', 'banned_ips', {});
-    delete bannedIps[ip];
-    db.set('ip_registry', 'banned_ips', bannedIps);
-    res.json({ ok: true });
+  app.delete('/api/ipban/:ip', auth, ownerOnly, async (req, res) => {
+    const ip = decodeURIComponent(req.params.ip);
+    const result = ipBan.unbanIp(ip, req.session.user?.id || 'dashboard');
+
+    if (!result) return res.status(404).json({ ok: false, msg: 'IP no encontrada en la lista de baneos' });
+
+    // Desbanear de Discord todas las cuentas afectadas
+    const gbans = db.get('globalbans', 'users', {});
+    for (const [userId, gban] of Object.entries(gbans)) {
+      if (gban.reason?.includes(`IP Ban (${ip})`)) {
+        for (const guild of client.guilds.cache.values()) {
+          try { await guild.bans.remove(userId, `System 777 · IP Unban desde dashboard`); } catch {}
+        }
+      }
+    }
+
+    res.json({ ok: true, unbannedCount: result.unbannedCount });
   });
 
   app.get('/api/ipregistry/:userId', auth, ownerOnly, (req, res) => {
-    const uips = db.get('ip_registry', 'user_ips', {});
-    const reg  = db.get('ip_registry', 'data', {});
-    const ips  = uips[req.params.userId] || [];
-    // For each IP, show all accounts
-    const details = ips.map(ip => ({ ip, accounts: reg[ip] || [] }));
-    res.json({ ok: true, userId: req.params.userId, ips, details });
+    const userIps = ipBan.getUserIps(req.params.userId);
+    res.json({ ok: true, userId: req.params.userId, ips: userIps });
   });
 
   app.get('/api/ipregistry/ip/:ip', auth, ownerOnly, (req, res) => {
