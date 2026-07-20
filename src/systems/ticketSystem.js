@@ -228,41 +228,13 @@ function buildPanel(cfg, guild) {
   const categories = (cfg.categories ?? []).filter(c => c.status !== 'inactive' && c.status !== 'disabled');
 
   if (categories.length > 0) {
-    for (const c of categories) {
-      const desc = c.description || 'Sin descripción';
-      embed.addFields({
-        name: `${c.emoji || '🎫'} ${c.label}`,
-        value: desc,
-        inline: true,
-      });
-    }
+    const catList = categories.map(c => `${c.emoji || '🎫'} **${c.label}** — ${c.description || 'Sin descripción'}`).join('\n');
+    embed.addFields({ name: '📂 Categorías Disponibles', value: catList || 'Sin categorías', inline: false });
   }
 
-  let components;
+  const components = [];
 
-  if (categories.length === 0) {
-    components = [new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('tkt_open_default')
-        .setLabel('📩 Abrir Ticket')
-        .setStyle(ButtonStyle.Primary)
-    )];
-  } else if (categories[0]?.style !== undefined) {
-    const rows = [];
-    for (let i = 0; i < Math.min(categories.length, 25); i++) {
-      const c     = categories[i];
-      const style = BUTTON_STYLES_MAP[String(c.style)] ?? ButtonStyle.Primary;
-      const btn   = new ButtonBuilder()
-        .setCustomId(`tkt_open_${c.categoryId || c.id}`)
-        .setLabel(c.label)
-        .setStyle(style);
-      if (c.emoji) btn.setEmoji(parseEmoji(c.emoji));
-      const rowIdx = Math.floor(i / 5);
-      if (!rows[rowIdx]) rows[rowIdx] = new ActionRowBuilder();
-      rows[rowIdx].addComponents(btn);
-    }
-    components = rows.slice(0, 5);
-  } else {
+  if (categories.length > 0) {
     const select = new StringSelectMenuBuilder()
       .setCustomId('tkt_select')
       .setPlaceholder('📂 Selecciona el tipo de soporte...')
@@ -270,13 +242,24 @@ function buildPanel(cfg, guild) {
         const opt = {
           label: c.label,
           value: c.categoryId || String(c.id),
-          description: c.description?.slice(0, 100) || undefined,
+          description: (c.description || 'Abrir ticket en esta categoría').slice(0, 100),
         };
         if (c.emoji) opt.emoji = parseEmoji(c.emoji);
         return opt;
       }));
-    components = [new ActionRowBuilder().addComponents(select)];
+    components.push(new ActionRowBuilder().addComponents(select));
   }
+
+  components.push(new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('tkt_open_default')
+      .setLabel('📩 Abrir Ticket')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setLabel('📋 Reglas')
+      .setStyle(ButtonStyle.Link)
+      .setURL(`https://discord.com/channels/${guild.id}`),
+  ));
 
   return { embeds: [embed], components };
 }
