@@ -331,7 +331,47 @@ module.exports = function startDashboard(client) {
   }
 
   app.get('/api/public/ticket/:guildId', async (req, res) => {
-    const cfg = await ticketDb.getConfig(req.params.guildId) || {};
+    let cfg = await ticketDb.getConfig(req.params.guildId) || {};
+    if (!cfg.panelChannel) {
+      const oldGuildCfg = db.get('guilds', req.params.guildId, {});
+      const oldTickets = oldGuildCfg.tickets;
+      if (oldTickets && (oldTickets.channelId || oldTickets.panelChannel)) {
+        cfg = {
+          panelChannel: oldTickets.channelId || oldTickets.panelChannel || '',
+          supportRole: oldTickets.supportRoleId || oldTickets.supportRole || '',
+          logChannel: oldTickets.logChannelId || oldTickets.logChannel || '',
+          ticketCategory: oldTickets.categoryId || oldTickets.ticketCategory || '',
+          channelPrefix: oldTickets.prefix || oldTickets.channelPrefix || 'ticket',
+          maxPerUser: oldTickets.maxTickets || oldTickets.maxPerUser || 3,
+          pingOnOpen: oldTickets.pingRole !== undefined ? oldTickets.pingRole : true,
+          dmTranscript: oldTickets.dmTranscript !== undefined ? oldTickets.dmTranscript : true,
+          autoCloseMinutes: oldTickets.autoCloseMinutes || 60,
+          ratingEnabled: true,
+          ratingRequired: false,
+          welcomeMessage: oldTickets.welcomeMsg || '',
+          panelTitle: oldTickets.title || 'Soporte',
+          panelDescription: oldTickets.description || '',
+          panelColor: oldTickets.color || '#5865F2',
+          panelImage: oldTickets.panelImage || '',
+        };
+        try {
+          await ticketDb.saveConfig(req.params.guildId, cfg);
+          const tkt = require('../src/systems/ticketSystem');
+          const cats = oldTickets.categories || [];
+          for (const cat of cats) {
+            await ticketDb.addCategory(req.params.guildId, {
+              categoryId: cat.id || cat.categoryId,
+              label: cat.label || cat.name,
+              emoji: cat.emoji || '🎫',
+              description: cat.description || '',
+            });
+          }
+          console.log(`[DASHBOARD] Migrated old ticket config for ${req.params.guildId}`);
+        } catch (e) {
+          console.error('[DASHBOARD] Migration error:', e.message);
+        }
+      }
+    }
     const categories = await ticketDb.getCategories(req.params.guildId);
     cfg.categories = categories;
     res.json({ ok: true, config: cfg });

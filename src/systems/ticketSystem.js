@@ -30,10 +30,42 @@ const BUTTON_STYLES_MAP = { '1': ButtonStyle.Primary, '2': ButtonStyle.Secondary
 
 async function getConfig(guildId) {
   const pgCfg = await ticketDb.getConfig(guildId);
-  if (pgCfg) {
+  if (pgCfg && pgCfg.panelChannel) {
     const categories = await ticketDb.getCategories(guildId);
     return { ...pgCfg, categories };
   }
+
+  const oldGuildCfg = db.get('guilds', guildId, {});
+  const oldTickets = oldGuildCfg.tickets;
+  if (oldTickets && (oldTickets.channelId || oldTickets.panelChannel)) {
+    const migrated = {
+      panelChannel: oldTickets.channelId || oldTickets.panelChannel || '',
+      supportRole: oldTickets.supportRoleId || oldTickets.supportRole || '',
+      logChannel: oldTickets.logChannelId || oldTickets.logChannel || '',
+      ticketCategory: oldTickets.categoryId || oldTickets.ticketCategory || '',
+      channelPrefix: oldTickets.prefix || oldTickets.channelPrefix || 'ticket',
+      maxPerUser: oldTickets.maxTickets || oldTickets.maxPerUser || 3,
+      pingOnOpen: oldTickets.pingRole !== undefined ? oldTickets.pingRole : (oldTickets.pingOnOpen !== undefined ? oldTickets.pingOnOpen : true),
+      dmTranscript: oldTickets.dmTranscript !== undefined ? oldTickets.dmTranscript : true,
+      autoCloseMinutes: oldTickets.autoCloseMinutes || 60,
+      ratingEnabled: true,
+      ratingRequired: false,
+      welcomeMessage: oldTickets.welcomeMsg || '',
+      panelTitle: oldTickets.title || oldTickets.panelTitle || 'Soporte',
+      panelDescription: oldTickets.description || oldTickets.panelDescription || '',
+      panelColor: oldTickets.color || oldTickets.panelColor || '#5865F2',
+      panelImage: oldTickets.panelImage || '',
+    };
+    try {
+      await ticketDb.saveConfig(guildId, migrated);
+      console.log(`[TICKET] Migrated old config for guild ${guildId} to PostgreSQL`);
+    } catch (e) {
+      console.error('[TICKET] Migration error:', e.message);
+    }
+    const categories = await ticketDb.getCategories(guildId);
+    return { ...migrated, categories };
+  }
+
   return db.get('ticketConfig', guildId, {});
 }
 
