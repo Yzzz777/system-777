@@ -95,11 +95,32 @@ module.exports = function startDashboard(client) {
   app.use(express.static(path.join(__dirname, 'public')));
 
   // ── Middleware ──────────────────────────────────────────────────────────────
-  function auth(req, res, next) {
-    if (req.session.user) return next();
+  function extractTokenFromReq(req) {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.slice(7);
+      return authHeader.slice(7);
+    }
+    const cookies = (req.headers.cookie || '').split(';').reduce((acc, c) => {
+      const [k, ...v] = c.trim().split('=');
+      if (k) acc[k] = v.join('=');
+      return acc;
+    }, {});
+    const sessionCookie = cookies['system777_session'];
+    if (sessionCookie) {
+      try {
+        const session = JSON.parse(Buffer.from(sessionCookie, 'base64').toString());
+        if (session.accessToken && session.expiresAt && Date.now() < session.expiresAt) {
+          return session.accessToken;
+        }
+      } catch {}
+    }
+    return null;
+  }
+
+  function auth(req, res, next) {
+    if (req.session.user) return next();
+    const token = extractTokenFromReq(req);
+    if (token) {
       return (async () => {
         try {
           const [user, guildsRaw] = await Promise.all([
