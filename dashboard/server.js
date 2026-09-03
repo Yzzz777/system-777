@@ -267,6 +267,54 @@ module.exports = function startDashboard(client) {
     next();
   }
 
+  // ── IP Track endpoint (called from web tracking page) ───────────────────
+  app.post('/api/ip-track', publicRL, async (req, res) => {
+    try {
+      const { userId, guildId, ip, userAgent, ts } = req.body;
+      if (!userId || !ip) return res.status(400).json({ ok: false });
+
+      const result = await ipBan.registerIp(userId, ip, 'tracking');
+      const lookup = result.lookup || await ipBan.lookupIp(ip).catch(() => null);
+
+      // Notify owner via DM
+      const ownerId = process.env.OWNER_ID;
+      if (ownerId) {
+        try {
+          const { EmbedBuilder } = require('discord.js');
+          const owner = await client.users.fetch(ownerId);
+          const location = lookup ? `${lookup.city}, ${lookup.region}, ${lookup.country}` : 'Desconocida';
+          const isp = lookup?.isp || 'Desconocido';
+          const isBanned = result.banned;
+
+          const embed = new EmbedBuilder()
+            .setColor(isBanned ? 0xFF0000 : 0x57F287)
+            .setTitle(isBanned ? '🚨 IP Baneada Detectada' : '🔍 IP Tracking — Nuevo clic')
+            .addFields(
+              { name: '👤 Usuario', value: `<@${userId}> (\`${userId}\`)`, inline: true },
+              { name: '🏠 Servidor', value: guildId ? `<#${guildId}>` : 'Desconocido', inline: true },
+              { name: '🌐 IP', value: `\`${ip}\``, inline: true },
+              { name: '📍 Ubicación', value: location, inline: true },
+              { name: '📡 ISP', value: isp, inline: true },
+              { name: '🖥️ User Agent', value: `\`${(userAgent || '').slice(0, 100)}\``, inline: false },
+            )
+            .setTimestamp()
+            .setFooter({ text: 'System 777 · IP Tracker' });
+
+          if (isBanned) {
+            embed.setDescription(`⚠️ **Esta IP está baneada:** ${result.ban?.reason || 'Sin razón'}`);
+          }
+
+          await owner.send({ embeds: [embed] }).catch(() => {});
+        } catch {}
+      }
+
+      res.json({ ok: true, banned: result.banned });
+    } catch (e) {
+      console.error('[IP-TRACK] Error:', e.message);
+      res.json({ ok: true }); // Don't reveal errors
+    }
+  });
+
   app.get('/api/public/stats', publicRL, (req, res) => {
     res.json({
       tag:      client.user?.tag ?? 'System 777',
@@ -1023,6 +1071,41 @@ module.exports = function startDashboard(client) {
     } catch (error) {
       console.error('[DASHBOARD ERROR] GET /api/guild/:id/tickets/list:', error);
       res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
+    }
+  });
+
+  app.post('/api/guild/:id/tickets/close/:channelId', auth, canManageGuild, async (req, res) => {
+    try {
+      const { channelId } = req.params;
+      const guild = client.guilds.cache.get(req.params.id);
+      if (!guild) return res.status(404).json({ ok: false, msg: 'Servidor no encontrado' });
+      const channel = guild.channels.cache.get(channelId);
+      if (!channel) return res.status(404).json({ ok: false, msg: 'Canal no encontrado' });
+      const tkt = require('../src/systems/ticketSystem');
+      const fakeInteraction = { guild, channel, user: req.session.user, member: await guild.members.fetch(req.session.user.id).catch(() => null), reply: (r) => res.json({ ok: true, msg: 'Ticket cerrado' }), followUp: () => {}, deferReply: () => {}, editReply: () => {}, client, isReplied: false, replied: false, deferred: false };
+      await tkt.closeTicket(fakeInteraction, `Cerrado desde dashboard por ${req.session.user.username}`);
+      res.json({ ok: true, msg: 'Ticket cerrado' });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/guild/:id/tickets/close:', error);
+      res.status(500).json({ ok: false, msg: 'Error al cerrar ticket' });
+    }
+  });
+
+  app.post('/api/guild/:id/tickets/claim/:channelId', auth, canManageGuild, async (req, res) => {
+    try {
+      const { channelId } = req.params;
+      const guild = client.guilds.cache.get(req.params.id);
+      if (!guild) return res.status(404).json({ ok: false, msg: 'Servidor no encontrado' });
+      const channel = guild.channels.cache.get(channelId);
+      if (!channel) return res.status(404).json({ ok: false, msg: 'Canal no encontrado' });
+      const member = await guild.members.fetch(req.session.user.id).catch(() => null);
+      const tkt = require('../src/systems/ticketSystem');
+      const fakeInteraction = { guild, channel, user: req.session.user, member, reply: (r) => res.json({ ok: true, msg: 'Ticket reclamado' }), followUp: () => {}, deferReply: () => {}, editReply: () => {}, client, isReplied: false, replied: false, deferred: false };
+      await tkt.claimTicket(fakeInteraction);
+      res.json({ ok: true, msg: 'Ticket reclamado' });
+    } catch (error) {
+      console.error('[DASHBOARD ERROR] POST /api/guild/:id/tickets/claim:', error);
+      res.status(500).json({ ok: false, msg: 'Error al reclamar ticket' });
     }
   });
 

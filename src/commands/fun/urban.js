@@ -7,47 +7,55 @@ module.exports = {
     .addStringOption(o => o.setName('termino').setDescription('Término a buscar').setRequired(true)),
 
   async execute(interaction) {
+    await interaction.deferReply();
     const term = interaction.options.getString('termino');
 
-    const definitions = {
-      'bot': 'Una programa automatizado que hace el trabajo que un humano no quiere hacer.',
-      'discord': 'Un app donde los programadores fingen tener vida social.',
-      'linux': 'Un sistema operativo para personas que disfrutan sufrir.',
-      'javascript': 'Un lenguaje donde null == undefined pero null !== undefined.',
-      'git': 'Un sistema de control de版本 que nadie entiende del todo.',
-      'wifi': 'La única relación que no quieres que se corte.',
-      'sleep': 'Esa cosa que los programadores hacen cuando no están programando.',
-      'coffee': 'El líquido que mantiene vivo al 90% de los desarrolladores.',
-      'bug': 'Una feature no documentada.',
-      'coding': 'El arte de escribir bugs y después buscarlos.',
-      'pizza': 'La única razón por la que un programador sale de su cuarto.',
-      'money': 'Eso que los programadores gastan en snacks y energía.',
-      'love': 'Un error 404 que todos buscan pero nadie encuentra.',
-      'hack': 'Lo que hace tu tío cuando le pides que arregle la compu.',
-      'server': 'Una caja que alguien puso en un cuarto oscuro y le tiene miedo.',
-    };
+    try {
+      const url = `https://api.urbandictionary.com/v0/define?term=${encodeURIComponent(term)}`;
+      const res = await fetch(url);
+      const data = await res.json();
 
-    const lower = term.toLowerCase();
-    let definition = definitions[lower];
+      if (!data.list || data.list.length === 0) {
+        return interaction.editReply({
+          embeds: [new EmbedBuilder()
+            .setColor(0xED4245)
+            .setTitle('📖 Urban Dictionary')
+            .setDescription(`No se encontró una definición para **${term}**.`)
+            .setFooter({ text: 'System 777 • jrsystem7777.com' })]
+        });
+      }
 
-    if (!definition) {
-      const keys = Object.keys(definitions);
-      const match = keys.find(k => lower.includes(k) || k.includes(lower));
-      if (match) definition = definitions[match];
+      const def = data.list[0];
+      const desc = def.definition.length > 1500
+        ? def.definition.slice(0, 1500) + '...'
+        : def.definition;
+
+      const example = def.example
+        ? `\n\n**Ejemplo:**\n> ${def.example.slice(0, 500)}`
+        : '';
+
+      const embed = new EmbedBuilder()
+        .setColor(0x1A1A2E)
+        .setTitle(`📖 ${def.word}`)
+        .setDescription(desc + example)
+        .addFields(
+          { name: '👍 Thumbs Up', value: `${def.thumbs_up}`, inline: true },
+          { name: '👎 Thumbs Down', value: `${def.thumbs_down}`, inline: true },
+          { name: '🔗 Link', value: `[Ver en Urban Dictionary](${def.permalink})`, inline: true }
+        )
+        .setAuthor({ name: `Escrito por ${def.author}` })
+        .setFooter({ text: 'System 777 • jrsystem7777.com' })
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [embed] });
+    } catch (err) {
+      await interaction.editReply({
+        embeds: [new EmbedBuilder()
+          .setColor(0xED4245)
+          .setTitle('❌ Error')
+          .setDescription('No pude consultar Urban Dictionary. Intenta de nuevo.')
+          .setFooter({ text: 'System 777 • jrsystem7777.com' })]
+      });
     }
-
-    if (!definition) {
-      const adjectives = ['epico', 'legendario', 'cuestionable', 'misterioso', 'extremo'];
-      const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
-      definition = `**${term}**: Algo tan ${adj} que ni Urban Dictionary sabe qué es. Probablemente lo inventó tu abuela.`;
-    }
-
-    const embed = new EmbedBuilder()
-      .setColor(0x1A1A2E)
-      .setTitle(`📖 Urban Dictionary: ${term}`)
-      .setDescription(definition)
-      .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' });
-
-    await interaction.reply({ embeds: [embed] });
   }
 };
