@@ -508,6 +508,18 @@ module.exports = function startDashboard(client) {
           } catch (e) { console.error('[DASHBOARD] logAction error:', e.message); }
         }
       }
+
+      if (bodyCategories.length > 0) {
+        for (const oldCat of existing) {
+          const stillInWeb = bodyCategories.some(c => String(c.id) === String(oldCat.id) || (oldCat.categoryId && String(c.id) === String(oldCat.categoryId)));
+          if (!stillInWeb) {
+            await ticketDb.deleteCategory(oldCat.id).catch((e) => console.error('[DASHBOARD] deleteCategory:', e.message));
+            try {
+              await ticketDb.logAction(req.params.guildId, null, null, 'category_removed', req.session.user.id, req.session.user.username, { categoryId: oldCat.categoryId || oldCat.id, label: oldCat.label });
+            } catch (e) { console.error('[DASHBOARD] logAction error:', e.message); }
+          }
+        }
+      }
     }
 
     if (updated.panelChannel) {
@@ -607,24 +619,9 @@ module.exports = function startDashboard(client) {
     const ch = guild.channels.cache.get(cfg.panelChannel);
     if (!ch) return res.status(400).json({ ok: false, msg: 'Canal de tickets no configurado. Configura el canal del panel primero.' });
     try {
-      const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
-      const embed = new EmbedBuilder()
-        .setTitle(cfg.panelTitle || `🎫 Sistema de Soporte — ${guild.name}`)
-        .setDescription(cfg.panelDescription || 'Selecciona el tipo de ticket.')
-        .setColor(cfg.panelColor || '#5865F2')
-        .setFooter({ text: 'System 777 · Tickets' });
-      const cats = (cfg.categories || []).slice(0, 25).map(c => {
-        const opt = { label: String(c.label || c.name || 'Categoría').slice(0, 100), value: String(c.id), emoji: c.emoji || '🎫' };
-        if (c.description) opt.description = c.description.slice(0, 100);
-        return opt;
-      });
-      if (cats.length === 0) cats.push({ label: 'General', value: 'general', emoji: '🎫', description: 'Soporte general' });
-      const select = new StringSelectMenuBuilder()
-        .setCustomId('tkt_select')
-        .setPlaceholder('Selecciona una categoría...')
-        .addOptions(cats);
-      const row = new ActionRowBuilder().addComponents(select);
-      const msg = await ch.send({ embeds: [embed], components: [row] });
+      const tkt = require('../src/systems/ticketSystem');
+      const { embeds, components } = tkt.buildPanel(cfg, guild);
+      const msg = await ch.send({ embeds, components });
       await ticketDb.saveConfig(req.params.id, { ...cfg, panelMessageId: msg.id });
       try {
         await ticketDb.logAction(req.params.id, null, null, 'panel_published', req.session.user.id, req.session.user.username, { channelId: ch.id, messageId: msg.id });
@@ -644,19 +641,49 @@ module.exports = function startDashboard(client) {
     try {
       const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
       const embed = new EmbedBuilder()
-        .setTitle('🔐 Verificación')
-        .setDescription(customMsg || 'Haz clic en el botón para verificar tu cuenta.')
-        .setColor('#5865F2')
-        .setFooter({ text: 'System 777 · Verificación' });
+        .setColor(0x00FF88)
+        .setTitle('✅ Verificación — ' + guild.name)
+        .setDescription(
+          customMsg ||
+          '**Haz clic en el botón de abajo para verificarte y obtener acceso al servidor.**\n\n' +
+          '> 🔐 La verificación confirma que eres humano y registra tu acceso de forma segura.\n' +
+          '> *Solo necesitas un clic — ¡es rápido y sencillo!*'
+        )
+        .setThumbnail(guild.iconURL({ size: 256 }) || undefined)
+        .setFooter({ text: 'System 777 · Verificación segura', iconURL: client.user.displayAvatarURL() })
+        .setTimestamp();
       const btn = new ButtonBuilder()
         .setCustomId('verify_button')
         .setLabel('Verificarme')
         .setStyle(ButtonStyle.Success)
         .setEmoji('✅');
       const row = new ActionRowBuilder().addComponents(btn);
-      await ch.send({ embeds: [embed], components: [row] });
+      const msg = await ch.send({ embeds: [embed], components: [row] });
+      const gcfg = db.get('guilds', req.params.id, {});
+      gcfg.verifyCfg = { active: true, channelId, messageId: msg.id, roleId: roleId || null, customMsg: customMsg || null };
+      if (roleId) gcfg.verifyRole = roleId;
+      db.set('guilds', req.params.id, gcfg);
       publicSaveConfig(req.params.id, 'verification', { active: true, channelId, roleId, customMsg });
       res.json({ ok: true, msg: 'Panel de verificación enviado' });
+    } catch (e) {
+      res.status(500).json({ ok: false, msg: 'Error: ' + e.message });
+    }
+  });
+
+  app.post('/api/public/guild/:id/verify/remove', auth, canManageGuild, async (req, res) => {
+    const guild = client.guilds.cache.get(req.params.id);
+    if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
+    try {
+      const gcfg = db.get('guilds', req.params.id, {});
+      const verifyCfg = gcfg.verifyCfg || {};
+      if (verifyCfg.channelId && verifyCfg.messageId) {
+        const ch = guild.channels.cache.get(verifyCfg.channelId);
+        if (ch) await ch.messages.delete(verifyCfg.messageId).catch(() => {});
+      }
+      gcfg.verifyCfg = { active: false };
+      db.set('guilds', req.params.id, gcfg);
+      publicSaveConfig(req.params.id, 'verification', { active: false });
+      res.json({ ok: true, msg: 'Panel de verificación desactivado' });
     } catch (e) {
       res.status(500).json({ ok: false, msg: 'Error: ' + e.message });
     }
@@ -823,24 +850,9 @@ module.exports = function startDashboard(client) {
     if (!channel) return res.status(404).json({ ok: false, msg: 'Canal no encontrado' });
 
     try {
-      const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
-      const embed = new EmbedBuilder()
-        .setTitle(cfg.panelTitle || `🎫 Sistema de Soporte — ${guild.name}`)
-        .setDescription(cfg.panelDescription || 'Selecciona el tipo de ticket.')
-        .setColor(cfg.panelColor || '#5865F2')
-        .setFooter({ text: 'System 777 · Tickets' });
-      const cats = (cfg.categories || []).slice(0, 25).map(c => {
-        const opt = { label: String(c.label || c.name || 'Categoría').slice(0, 100), value: String(c.id), emoji: c.emoji || '🎫' };
-        if (c.description) opt.description = c.description.slice(0, 100);
-        return opt;
-      });
-      if (cats.length === 0) cats.push({ label: 'General', value: 'general', emoji: '🎫', description: 'Soporte general' });
-      const select = new StringSelectMenuBuilder()
-        .setCustomId('tkt_select')
-        .setPlaceholder('Selecciona una categoría...')
-        .addOptions(cats);
-      const row = new ActionRowBuilder().addComponents(select);
-      const msg = await channel.send({ embeds: [embed], components: [row] });
+      const tkt = require('../src/systems/ticketSystem');
+      const { embeds, components } = tkt.buildPanel(cfg, guild);
+      const msg = await channel.send({ embeds, components });
       await ticketDb.saveConfig(req.params.id, { ...cfg, panelMessageId: msg.id });
       try {
         await ticketDb.logAction(req.params.id, null, null, 'panel_published', req.session.user.id, req.session.user.username, { channelId: channel.id, messageId: msg.id });

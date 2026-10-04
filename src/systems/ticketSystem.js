@@ -220,7 +220,8 @@ function buildPanel(cfg, guild) {
       `> 📌 Respeta al staff y sé paciente.`
     )
     .setThumbnail(guild.iconURL({ size: 256 }))
-    .setFooter({ text: `${guild.name} · Soporte • Powered by System 777`, iconURL: guild.iconURL() || undefined })
+    .setAuthor({ name: guild.name, iconURL: guild.iconURL({ size: 64 }) || undefined })
+    .setFooter({ text: 'Soporte profesional • Powered by System 777', iconURL: guild.iconURL() || undefined })
     .setTimestamp();
 
   if (cfg.panelImage) embed.setImage(cfg.panelImage);
