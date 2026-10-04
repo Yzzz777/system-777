@@ -613,7 +613,11 @@ module.exports = function startDashboard(client) {
         .setDescription(cfg.panelDescription || 'Selecciona el tipo de ticket.')
         .setColor(cfg.panelColor || '#5865F2')
         .setFooter({ text: 'System 777 · Tickets' });
-      const cats = (cfg.categories || []).map(c => ({ label: c.label || c.name, value: String(c.id), emoji: c.emoji || '🎫', description: c.description || '' }));
+      const cats = (cfg.categories || []).slice(0, 25).map(c => {
+        const opt = { label: String(c.label || c.name || 'Categoría').slice(0, 100), value: String(c.id), emoji: c.emoji || '🎫' };
+        if (c.description) opt.description = c.description.slice(0, 100);
+        return opt;
+      });
       if (cats.length === 0) cats.push({ label: 'General', value: 'general', emoji: '🎫', description: 'Soporte general' });
       const select = new StringSelectMenuBuilder()
         .setCustomId('tkt_select')
@@ -825,7 +829,11 @@ module.exports = function startDashboard(client) {
         .setDescription(cfg.panelDescription || 'Selecciona el tipo de ticket.')
         .setColor(cfg.panelColor || '#5865F2')
         .setFooter({ text: 'System 777 · Tickets' });
-      const cats = (cfg.categories || []).map(c => ({ label: c.label || c.name, value: String(c.id), emoji: c.emoji || '🎫', description: c.description || '' }));
+      const cats = (cfg.categories || []).slice(0, 25).map(c => {
+        const opt = { label: String(c.label || c.name || 'Categoría').slice(0, 100), value: String(c.id), emoji: c.emoji || '🎫' };
+        if (c.description) opt.description = c.description.slice(0, 100);
+        return opt;
+      });
       if (cats.length === 0) cats.push({ label: 'General', value: 'general', emoji: '🎫', description: 'Soporte general' });
       const select = new StringSelectMenuBuilder()
         .setCustomId('tkt_select')

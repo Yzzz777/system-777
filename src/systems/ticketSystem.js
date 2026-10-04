@@ -228,8 +228,15 @@ function buildPanel(cfg, guild) {
   const categories = (cfg.categories ?? []).filter(c => c.status !== 'inactive' && c.status !== 'disabled');
 
   if (categories.length > 0) {
-    const catList = categories.map(c => `${c.emoji || '🎫'} **${c.label}** — ${c.description || 'Sin descripción'}`).join('\n');
-    embed.addFields({ name: '📂 Categorías Disponibles', value: catList || 'Sin categorías', inline: false });
+    const catLines = categories.map(c => `${c.emoji || '🎫'} **${c.label}** — ${c.description || 'Sin descripción'}`);
+    const shownLines = [];
+    let linesLen = 0;
+    for (const line of catLines) {
+      if (linesLen + line.length + 1 > 1000) break;
+      shownLines.push(line);
+      linesLen += line.length + 1;
+    }
+    embed.addFields({ name: '📂 Categorías Disponibles', value: shownLines.join('\n') || 'Sin categorías', inline: false });
   }
 
   const components = [];
@@ -238,9 +245,9 @@ function buildPanel(cfg, guild) {
     const select = new StringSelectMenuBuilder()
       .setCustomId('tkt_select')
       .setPlaceholder('📂 Selecciona el tipo de soporte...')
-      .addOptions(categories.map(c => {
+      .addOptions(categories.slice(0, 25).map(c => {
         const opt = {
-          label: c.label,
+          label: c.label || 'Categoría',
           value: c.categoryId || String(c.id),
           description: (c.description || 'Abrir ticket en esta categoría').slice(0, 100),
         };
