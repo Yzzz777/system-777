@@ -3,6 +3,10 @@ const { cacheGuildInvites } = require('../systems/inviteTracker');
 module.exports = {
   name: 'inviteCreate',
   async execute(invite) {
-    if (invite.guild) await cacheGuildInvites(invite.guild).catch(() => {});
+    try {
+      if (invite.guild) await cacheGuildInvites(invite.guild).catch(() => {});
+    } catch (error) {
+      console.error('[EVENT ERROR] inviteCreate:', error);
+    }
   },
 };

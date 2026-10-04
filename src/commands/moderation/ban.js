@@ -1,7 +1,8 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const sysLogger = require('../../systems/logger');
 const db        = require('../../utils/db');
 const logger    = require('../../utils/logger');
+const { modEmbed, errorEmbed, COLORS } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -51,6 +52,7 @@ module.exports = {
         reason: `${reason} | Moderador: ${interaction.user.tag}${makeGlobal ? ' | GLOBAL' : ''}`,
         deleteMessageSeconds: dias * 86400,
       });
+      db.logActivity(interaction.guild.id, { actionType: 'ban', userId: interaction.user.id, targetId: user.id, details: `Ban: ${user.tag} | Razón: ${reason}` });
     } catch (e) {
       return interaction.editReply({ content: `❌ No pude banear: ${e.message}` });
     }
@@ -76,22 +78,20 @@ module.exports = {
       logger.warn(`GlobalBan via /ban aplicado a ${user.id} en ${globalCount} servidores extra. Razón: ${reason}`);
     }
 
-    const embed = new EmbedBuilder()
-      .setColor(0xFF0000)
-      .setTitle(makeGlobal ? '⛔ Usuario Baneado Globalmente' : '🔨 Usuario Baneado')
-      .setThumbnail(user.displayAvatarURL({ size: 128 }))
-      .addFields(
-        { name: 'Usuario',           value: `${user.tag} \`(${user.id})\``,                  inline: true },
-        { name: 'Moderador',         value: `${interaction.user.tag}`,                         inline: true },
-        { name: 'Razón',             value: reason },
-        { name: 'Mensajes borrados', value: `${dias} días`,                                    inline: true },
-      )
-      .setTimestamp()
-      .setFooter({ text: 'System 777 · Developer 777' });
-
-    if (makeGlobal) {
-      embed.addFields({ name: '🌐 Ban Global', value: `Propagado a **${globalCount + 1}** servidores.\nBan permanente — solo owner puede revertirlo.` });
-    }
+    const embed = modEmbed(
+      makeGlobal ? '⛔ Usuario Baneado Globalmente' : '🔨 Usuario Baneado',
+      null,
+      {
+        thumbnail: user.displayAvatarURL({ size: 128 }),
+        fields: [
+          { name: 'Usuario',           value: `${user.tag} \`(${user.id})\``,                  inline: true },
+          { name: 'Moderador',         value: `${interaction.user.tag}`,                         inline: true },
+          { name: 'Razón',             value: reason },
+          { name: 'Mensajes borrados', value: `${dias} días`,                                    inline: true },
+          ...(makeGlobal ? [{ name: '🌐 Ban Global', value: `Propagado a **${globalCount + 1}** servidores.\nBan permanente — solo owner puede revertirlo.` }] : [])
+        ]
+      }
+    );
 
     await interaction.editReply({ embeds: [embed] });
     await sysLogger.logBan(interaction.guild, user, interaction.user, reason);

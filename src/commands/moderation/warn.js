@@ -1,6 +1,7 @@
-﻿const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const db        = require('../../utils/db');
 const sysLogger = require('../../systems/logger');
+const { warningEmbed, successEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -34,17 +35,14 @@ module.exports = {
       warns.push({ reason, mod: interaction.user.id, ts: Date.now() });
       db.set('warns', key, warns);
 
-      const embed = new EmbedBuilder()
-        .setColor(0xFFCC00)
-        .setTitle('⚠️ Advertencia Añadida')
-        .addFields(
+      const embed = warningEmbed('⚠️ Advertencia Añadida', null, {
+        fields: [
           { name: 'Usuario',     value: `${target.tag} \`(${target.id})\``, inline: true },
           { name: 'Moderador',   value: interaction.user.tag,                inline: true },
           { name: 'Total warns', value: `${warns.length}`,                   inline: true },
           { name: 'Razón',       value: reason }
-        )
-        .setTimestamp()
-        .setFooter({ text: 'System 777 · Developer 777' });
+        ]
+      });
 
       await interaction.reply({ embeds: [embed] });
       await sysLogger.logWarn(interaction.guild, target, interaction.user, reason);
@@ -56,11 +54,7 @@ module.exports = {
         : 'Sin advertencias.';
 
       await interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(0xFFAA00)
-          .setTitle(`⚠️ Advertencias de ${target.tag}`)
-          .setDescription(desc)
-          .setFooter({ text: 'System 777 · Developer 777' })]
+        embeds: [warningEmbed(`⚠️ Advertencias de ${target.tag}`, desc)]
       });
 
     } else if (sub === 'clear') {

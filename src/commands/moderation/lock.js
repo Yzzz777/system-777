@@ -1,4 +1,5 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { modEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -20,16 +21,13 @@ module.exports = {
         AddReactions: false,
       });
 
-      const embed = new EmbedBuilder()
-        .setColor(0xFF4444)
-        .setTitle('🔒 Canal Bloqueado')
-        .addFields(
+      const embed = modEmbed('🔒 Canal Bloqueado', null, {
+        fields: [
           { name: '📢 Canal',     value: canal.toString(),         inline: true },
           { name: '👮 Mod',       value: interaction.user.tag,     inline: true },
           { name: '📝 Razón',     value: razon,                    inline: false },
-        )
-        .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })
-        .setTimestamp();
+        ]
+      });
 
       await interaction.reply({ embeds: [embed] });
     } catch (e) {

@@ -1,4 +1,5 @@
-﻿const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { errorEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -20,12 +21,7 @@ module.exports = {
     await channel.delete(`Nuke: ${reason}`);
 
     await newChannel.send({
-      embeds: [new EmbedBuilder()
-        .setColor(0xFF4444)
-        .setTitle('💥 Canal Nukeado')
-        .setDescription(`Este canal fue recreado por **${interaction.user.tag}**.\n**Razón:** ${reason}`)
-        .setFooter({ text: 'System 777 · Developer 777' })
-        .setTimestamp()]
+      embeds: [errorEmbed('💥 Canal Nukeado', `Este canal fue recreado por **${interaction.user.tag}**.\n**Razón:** ${reason}`)]
     });
   }
 };

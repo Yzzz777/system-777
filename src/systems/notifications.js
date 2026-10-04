@@ -24,9 +24,14 @@ function addHistory(entry) {
   db.set('notifications', 'history', hist);
 }
 
-function fetchUrl(url) {
+function fetchUrl(url, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
+    if (maxRedirects <= 0) return reject(new Error('too many redirects'));
     const req = https.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        return fetchUrl(res.headers.location, maxRedirects - 1).then(resolve, reject);
+      }
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => resolve(data));
@@ -51,14 +56,15 @@ async function checkYouTube(client) {
       sub.lastVideoId = videoId;
       saveConfig(cfg);
 
-      for (const guild of client.guilds.cache.values()) {
-        const ch = guild.channels.cache.get(sub.discordChannelId);
-        if (!ch) continue;
+      const guild = client.guilds.cache.get(sub.guildId);
+      const ch = guild?.channels.cache.get(sub.discordChannelId);
+      if (ch) {
         const embed = new EmbedBuilder()
           .setTitle(`🎬 ${title}`)
           .setURL(`https://www.youtube.com/watch?v=${videoId}`)
           .setImage(thumbnail)
           .setColor(sub.color || '#FF0000')
+          .setAuthor({ name: sub.channelName || sub.channelId, iconURL: 'https://www.youtube.com/favicon.ico' })
           .setFooter({ text: 'System 777 · YouTube Notifications' })
           .setTimestamp();
         if (sub.message) embed.setDescription(sub.message.replace('{video}', title).replace('{url}', `https://www.youtube.com/watch?v=${videoId}`));
@@ -77,23 +83,26 @@ async function checkKick(client) {
     if (!sub.username || !sub.discordChannelId) continue;
     try {
       const html = await fetchUrl(`https://kick.com/api/v2/channels/${sub.username}`);
-      const data = JSON.parse(html);
+      let data;
+      try { data = JSON.parse(html); } catch { continue; }
+      if (!data || !data.livestream && data.playing !== true) continue;
       const isLive = data.playing === true || data.livestream?.id;
       const wasLive = sub.isLive || false;
       sub.isLive = isLive;
       saveConfig(cfg);
 
       if (isLive && !wasLive) {
-        for (const guild of client.guilds.cache.values()) {
-          const ch = guild.channels.cache.get(sub.discordChannelId);
-          if (!ch) continue;
+        const guild = client.guilds.cache.get(sub.guildId);
+        const ch = guild?.channels.cache.get(sub.discordChannelId);
+        if (ch) {
           const stream = data.livestream || {};
           const embed = new EmbedBuilder()
             .setTitle(`🔴 ${sub.username} está en DIRECTO`)
             .setDescription(stream.session_title || '¡Ahora mismo está transmitiendo!')
             .setURL(`https://kick.com/${sub.username}`)
             .setThumbnail(data.profile?.avatar || '')
-            .setColor(sub.color || '#53FC18')
+            .setColor(sub.color || '#53FF00')
+            .setAuthor({ name: sub.username, iconURL: data.profile?.avatar || '', url: `https://kick.com/${sub.username}` })
             .addFields(
               { name: '👁️ Espectadores', value: `${stream.viewers_count || 0}`, inline: true },
               { name: '🎮 Categoría', value: stream.categories?.[0]?.name || 'General', inline: true },
@@ -117,6 +126,7 @@ async function checkTikTok(client) {
     if (!sub.username || !sub.discordChannelId) continue;
     try {
       const html = await fetchUrl(`https://www.tiktok.com/@${sub.username}`);
+      if (!html || html.length < 1000) continue;
       const match = html.match(/"id":"(\d+)","desc":"(.*?)".*?"createTime":"(\d+)"/);
       if (!match) continue;
       const [, videoId, desc, createTime] = match;
@@ -125,14 +135,15 @@ async function checkTikTok(client) {
       sub.lastVideoId = videoId;
       saveConfig(cfg);
 
-      for (const guild of client.guilds.cache.values()) {
-        const ch = guild.channels.cache.get(sub.discordChannelId);
-        if (!ch) continue;
+      const guild = client.guilds.cache.get(sub.guildId);
+      const ch = guild?.channels.cache.get(sub.discordChannelId);
+      if (ch) {
         const embed = new EmbedBuilder()
           .setTitle(`🎵 ${sub.username} subió un TikTok`)
           .setDescription(desc || 'Nuevo video en TikTok')
           .setURL(`https://www.tiktok.com/@${sub.username}/video/${videoId}`)
-          .setColor(sub.color || '#000000')
+          .setColor(sub.color || '#FF0050')
+          .setAuthor({ name: sub.username, url: `https://www.tiktok.com/@${sub.username}` })
           .setFooter({ text: 'System 777 · TikTok Notifications' })
           .setTimestamp();
         if (sub.message) embed.setDescription(sub.message.replace('{user}', sub.username).replace('{video}', desc || ''));

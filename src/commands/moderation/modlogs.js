@@ -1,5 +1,6 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { getModLogs } = require('../../systems/logger');
+const { infoEmbed } = require('../../utils/embeds');
 
 const ICONS = { ban:'🔨', unban:'✅', kick:'👢', warn:'⚠️', timeout:'⏱️' };
 
@@ -35,12 +36,7 @@ module.exports = {
     });
 
     await interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setTitle(target ? `📋 Modlogs — ${target.username}` : '📋 Historial de Moderación')
-        .setDescription(lines.join('\n'))
-        .setFooter({ text: `System 777 · ${logs.length} registros · Dev: 777` })
-        .setTimestamp()],
+      embeds: [infoEmbed(target ? `📋 Modlogs — ${target.username}` : '📋 Historial de Moderación', lines.join('\n'))],
       flags: MessageFlags.Ephemeral
     });
   }

@@ -145,4 +145,17 @@ async function onWebhookCreate(guild, webhook, client) {
   }
 }
 
-module.exports = { onBanAdd, onChannelDelete, onRoleDelete, onWebhookCreate };
+function cleanupTracker() {
+  const now = Date.now();
+  for (const [key, data] of tracker) {
+    data.bans = data.bans.filter(t => now - t < WINDOW);
+    data.delChannels = data.delChannels.filter(t => now - t < WINDOW);
+    data.delRoles = data.delRoles.filter(t => now - t < WINDOW);
+    data.webhooks = data.webhooks.filter(t => now - t < WINDOW);
+    if (data.bans.length === 0 && data.delChannels.length === 0 && data.delRoles.length === 0 && data.webhooks.length === 0) {
+      tracker.delete(key);
+    }
+  }
+}
+
+module.exports = { onBanAdd, onChannelDelete, onRoleDelete, onWebhookCreate, cleanupTracker };

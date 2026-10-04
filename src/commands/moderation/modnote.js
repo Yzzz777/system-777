@@ -1,6 +1,7 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const db      = require('../../utils/db');
 const ausencia = require('../../systems/ausencia');
+const { infoEmbed, successEmbed, warningEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -62,12 +63,9 @@ module.exports = {
         if (!notas.length) return interaction.reply({ content: `✅ Sin notas para **${target.username}**.`, flags: MessageFlags.Ephemeral });
         const desc = notas.map((n, i) => `**${i + 1}.** <@${n.mod}> <t:${Math.floor(n.ts / 1000)}:R>\n> ${n.text}`).join('\n\n');
         return interaction.reply({
-          embeds: [new EmbedBuilder()
-            .setColor(0x5865F2)
-            .setTitle(`🗒️ Notas — ${target.username}`)
-            .setThumbnail(target.displayAvatarURL({ size: 64 }))
-            .setDescription(desc)
-            .setFooter({ text: 'System 777 · Solo visible para mods' })],
+          embeds: [infoEmbed(`🗒️ Notas — ${target.username}`, desc, {
+            thumbnail: target.displayAvatarURL({ size: 64 })
+          })],
           flags: MessageFlags.Ephemeral,
         });
       }
@@ -85,10 +83,7 @@ module.exports = {
         const canal = interaction.options.getChannel('canal');
         ausencia.setChannel(interaction.guild.id, canal.id);
         return interaction.reply({
-          embeds: [new EmbedBuilder()
-            .setColor(0x57F287)
-            .setDescription(`✅ Canal de ausencias configurado: ${canal}\nAhora las ausencias del staff se publicarán ahí automáticamente.`)
-            .setFooter({ text: 'System 777 · Ausencias' })],
+          embeds: [successEmbed('✅ Canal de Ausencias Configurado', `Canal de ausencias configurado: ${canal}\nAhora las ausencias del staff se publicarán ahí automáticamente.`)],
           flags: MessageFlags.Ephemeral,
         });
       }
@@ -111,20 +106,17 @@ module.exports = {
         const ausenciaChannel = ausencia.getChannel(interaction.guild.id);
         let messageId = null;
 
-        const embed = new EmbedBuilder()
-          .setColor(0xFF9900)
-          .setTitle('🟡 Staff Ausente')
-          .setThumbnail(targetUser.displayAvatarURL({ size: 128 }))
-          .addFields(
+        const embed = warningEmbed('🟡 Staff Ausente', null, {
+          thumbnail: targetUser.displayAvatarURL({ size: 128 }),
+          fields: [
             { name: '👤 Miembro',    value: `<@${targetUser.id}>`,                              inline: true },
             { name: '📋 Motivo',     value: razon,                                              inline: true },
             { name: '⏱️ Duración',  value: ausencia.formatRemaining(endTime),                  inline: true },
             { name: '📅 Desde',      value: `<t:${Math.floor(Date.now() / 1000)}:R>`,          inline: true },
             { name: '🔖 Registrada por', value: `<@${interaction.user.id}>`,                   inline: true },
             { name: '🔚 Regresa',    value: endTime ? `<t:${Math.floor(endTime / 1000)}:R>` : '♾️ Indefinido', inline: true },
-          )
-          .setFooter({ text: 'System 777 · Ausencias Staff' })
-          .setTimestamp();
+          ]
+        });
 
         // Post in ausencia channel if configured
         if (ausenciaChannel) {
@@ -138,19 +130,16 @@ module.exports = {
         ausencia.set(interaction.guild.id, targetUser.id, razon, endTime, interaction.user.id, ausenciaChannel, messageId);
 
         return interaction.reply({
-          embeds: [new EmbedBuilder()
-            .setColor(0xFF9900)
-            .setTitle('✅ Ausencia Registrada')
-            .setDescription(
-              ausenciaChannel
-                ? `La ausencia de **${targetUser.username}** fue publicada en <#${ausenciaChannel}>.`
-                : `⚠️ Ausencia registrada, pero no hay canal configurado. Usa \`/modnote ausencia setup\` para configurarlo.`
-            )
-            .addFields(
-              { name: 'Motivo',    value: razon,                                inline: true },
-              { name: 'Duración',  value: ausencia.formatRemaining(endTime),    inline: true },
-            )
-            .setFooter({ text: 'System 777 · Ausencias' })],
+          embeds: [warningEmbed('✅ Ausencia Registrada',
+            ausenciaChannel
+              ? `La ausencia de **${targetUser.username}** fue publicada en <#${ausenciaChannel}>.`
+              : `⚠️ Ausencia registrada, pero no hay canal configurado. Usa \`/modnote ausencia setup\` para configurarlo.`,
+            {
+              fields: [
+                { name: 'Motivo',    value: razon,                                inline: true },
+                { name: 'Duración',  value: ausencia.formatRemaining(endTime),    inline: true },
+              ]
+            })],
           flags: MessageFlags.Ephemeral,
         });
       }
@@ -168,6 +157,7 @@ module.exports = {
           const ch = interaction.guild.channels.cache.get(data.channelId);
           if (ch) {
             ch.messages.fetch(data.messageId).then(msg => {
+              const { EmbedBuilder } = require('discord.js');
               const updated = EmbedBuilder.from(msg.embeds[0])
                 .setColor(0x57F287)
                 .setTitle('🟢 Staff de Regreso')
@@ -178,10 +168,7 @@ module.exports = {
         }
 
         return interaction.reply({
-          embeds: [new EmbedBuilder()
-            .setColor(0x57F287)
-            .setDescription(`✅ Ausencia de **${targetUser.username}** cancelada. ¡Bienvenido de vuelta!`)
-            .setFooter({ text: 'System 777 · Ausencias' })],
+          embeds: [successEmbed('✅ Ausencia Cancelada', `Ausencia de **${targetUser.username}** cancelada. ¡Bienvenido de vuelta!`)],
           flags: MessageFlags.Ephemeral,
         });
       }
@@ -190,10 +177,7 @@ module.exports = {
         const activas = ausencia.listGuild(interaction.guild.id);
         if (!activas.length) {
           return interaction.reply({
-            embeds: [new EmbedBuilder()
-              .setColor(0x57F287)
-              .setDescription('✅ No hay ausencias activas en el servidor actualmente.')
-              .setFooter({ text: 'System 777 · Ausencias' })],
+            embeds: [successEmbed('✅ Sin Ausencias', 'No hay ausencias activas en el servidor actualmente.')],
             flags: MessageFlags.Ephemeral,
           });
         }
@@ -203,12 +187,7 @@ module.exports = {
         );
 
         return interaction.reply({
-          embeds: [new EmbedBuilder()
-            .setColor(0xFF9900)
-            .setTitle(`🟡 Ausencias Activas (${activas.length})`)
-            .setDescription(lines.join('\n'))
-            .setFooter({ text: 'System 777 · Ausencias Staff' })
-            .setTimestamp()],
+          embeds: [warningEmbed(`🟡 Ausencias Activas (${activas.length})`, lines.join('\n'))],
           flags: MessageFlags.Ephemeral,
         });
       }

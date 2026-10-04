@@ -7,24 +7,31 @@ module.exports = {
     .addStringOption(o => o.setName('algo').setDescription('¿Qué calificar?').setRequired(true)),
 
   async execute(interaction) {
-    const algo = interaction.options.getString('algo');
-    const rating = Math.floor(Math.random() * 11);
-    const stars = '⭐'.repeat(rating) + '☆'.repeat(10 - rating);
+    try {
+      const algo = interaction.options.getString('algo');
+      const rating = Math.floor(Math.random() * 11);
+      const stars = '⭐'.repeat(rating) + '☆'.repeat(10 - rating);
 
-    let desc;
-    if (rating >= 9)       desc = '🔥 ¡PERFECTO! Esto es insuperable.';
-    else if (rating >= 7)  desc = '👏 Muy bueno, le faltó poco para la perfección.';
-    else if (rating >= 5)  desc = '🤷 Regular, cumple su función.';
-    else if (rating >= 3)  desc = '😬 Meh... hay cosas mejores.';
-    else if (rating >= 1)  desc = '💀 Ni tu abuela lo calificaría bien.';
-    else                   desc = '☠️ Esto no debería existir.';
+      let desc;
+      if (rating >= 9)       desc = '🔥 ¡PERFECTO! Esto es insuperable.';
+      else if (rating >= 7)  desc = '👏 Muy bueno, le faltó poco para la perfección.';
+      else if (rating >= 5)  desc = '🤷 Regular, cumple su función.';
+      else if (rating >= 3)  desc = '😬 Meh... hay cosas mejores.';
+      else if (rating >= 1)  desc = '💀 Ni tu abuela lo calificaría bien.';
+      else                   desc = '☠️ Esto no debería existir.';
 
-    const embed = new EmbedBuilder()
-      .setColor(rating >= 7 ? 0x00FF88 : rating >= 4 ? 0xFFD93D : 0xFF4500)
-      .setTitle('⭐ Rate Machine')
-      .setDescription(`¿**${algo}**?\n\n${stars}\n\n**${rating}/10** — ${desc}`)
-      .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' });
+      const embed = new EmbedBuilder()
+        .setColor(rating >= 7 ? 0x00FF88 : rating >= 4 ? 0xFFD93D : 0xFF4500)
+        .setTitle('⭐ Rate Machine')
+        .setDescription(`¿**${algo}**?\n\n${stars}\n\n**${rating}/10** — ${desc}`)
+        .setFooter({ text: 'System 777 • jrsystem7777.com' });
 
-    await interaction.reply({ embeds: [embed] });
+      await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+      console.error('[ERROR] rate:', error);
+      const reply = { content: '❌ Error interno del comando.', ephemeral: true };
+      if (interaction.deferred) await interaction.editReply(reply).catch(() => {});
+      else await interaction.reply(reply).catch(() => {});
+    }
   }
 };

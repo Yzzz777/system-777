@@ -25,16 +25,23 @@ module.exports = {
     .addUserOption(o => o.setName('usuario').setDescription('¿A quién halagar?')),
 
   async execute(interaction) {
-    const target = interaction.options.getUser('usuario') || interaction.user;
-    const compliment = compliments[Math.floor(Math.random() * compliments.length)];
+    try {
+      const target = interaction.options.getUser('usuario') || interaction.user;
+      const compliment = compliments[Math.floor(Math.random() * compliments.length)];
 
-    const embed = new EmbedBuilder()
-      .setColor(0xFF69B4)
-      .setTitle('💕 Machine de Halagos')
-      .setDescription(`**${target.tag}**, esto es para ti:\n\n> ${compliment}`)
-      .setThumbnail(target.displayAvatarURL({ dynamic: true }))
-      .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' });
+      const embed = new EmbedBuilder()
+        .setColor(0xFF69B4)
+        .setTitle('💕 Machine de Halagos')
+        .setDescription(`**${target.tag}**, esto es para ti:\n\n> ${compliment}`)
+        .setThumbnail(target.displayAvatarURL({ dynamic: true }))
+        .setFooter({ text: 'System 777 • jrsystem7777.com' });
 
-    await interaction.reply({ embeds: [embed] });
+      await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+      console.error('[ERROR] compliment:', error);
+      const reply = { content: '❌ Error interno del comando.', ephemeral: true };
+      if (interaction.deferred) await interaction.editReply(reply).catch(() => {});
+      else await interaction.reply(reply).catch(() => {});
+    }
   }
 };

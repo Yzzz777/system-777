@@ -30,16 +30,23 @@ module.exports = {
     .addUserOption(o => o.setName('usuario').setDescription('¿A quién roastear?')),
 
   async execute(interaction) {
-    const target = interaction.options.getUser('usuario') || interaction.user;
-    const roast = roasts[Math.floor(Math.random() * roasts.length)];
+    try {
+      const target = interaction.options.getUser('usuario') || interaction.user;
+      const roast = roasts[Math.floor(Math.random() * roasts.length)];
 
-    const embed = new EmbedBuilder()
-      .setColor(0xFF4500)
-      .setTitle('🔥 Roast Machine')
-      .setDescription(`**${target.tag}**, esto es para ti:\n\n> ${roast}`)
-      .setThumbnail(target.displayAvatarURL({ dynamic: true }))
-      .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' });
+      const embed = new EmbedBuilder()
+        .setColor(0xFF4500)
+        .setTitle('🔥 Roast Machine')
+        .setDescription(`**${target.tag}**, esto es para ti:\n\n> ${roast}`)
+        .setThumbnail(target.displayAvatarURL({ dynamic: true }))
+        .setFooter({ text: 'System 777 • jrsystem7777.com' });
 
-    await interaction.reply({ embeds: [embed] });
+      await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+      console.error('[ERROR] roast:', error);
+      const reply = { content: '❌ Error interno del comando.', ephemeral: true };
+      if (interaction.deferred) await interaction.editReply(reply).catch(() => {});
+      else await interaction.reply(reply).catch(() => {});
+    }
   }
 };

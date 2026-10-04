@@ -20,37 +20,44 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    const input = interaction.options.getString('fecha');
-    const format = interaction.options.getString('formato') || 'f';
+    try {
+      const input = interaction.options.getString('fecha');
+      const format = interaction.options.getString('formato') || 'f';
 
-    let date;
-    if (input.toLowerCase() === 'ahora') {
-      date = new Date();
-    } else {
-      date = new Date(input);
-      if (isNaN(date.getTime())) {
-        return interaction.reply({ content: '❌ Fecha inválida. Usa formato: `YYYY-MM-DD HH:MM` o `ahora`', flags: MessageFlags.Ephemeral });
+      let date;
+      if (input.toLowerCase() === 'ahora') {
+        date = new Date();
+      } else {
+        date = new Date(input);
+        if (isNaN(date.getTime())) {
+          return interaction.reply({ content: '❌ Fecha inválida. Usa formato: `YYYY-MM-DD HH:MM` o `ahora`', flags: MessageFlags.Ephemeral });
+        }
       }
+
+      const unix = Math.floor(date.getTime() / 1000);
+      const stamp = `<t:${unix}:${format}>`;
+      const stampCode = `\`<t:${unix}:${format}>\``;
+
+      const examples = ['d', 'D', 't', 'T', 'f', 'F', 'R'].map(f =>
+        `**${f}**: <t:${unix}:${f}> → \`<t:${unix}:${f}>\``
+      ).join('\n');
+
+      const embed = new EmbedBuilder()
+        .setColor(0xFFD93D)
+        .setTitle('⏰ Timestamp Generator')
+        .addFields(
+          { name: '📥 Fecha', value: date.toISOString(), inline: false },
+          { name: '📤 Tu Timestamp', value: `${stamp}\n${stampCode}`, inline: false },
+          { name: '📋 Todos los formatos', value: examples, inline: false },
+        )
+        .setFooter({ text: 'System 777 • jrsystem7777.com' });
+
+      await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+      console.error('[ERROR] timestamp:', error);
+      const reply = { content: '❌ Error interno del comando.', ephemeral: true };
+      if (interaction.deferred) await interaction.editReply(reply).catch(() => {});
+      else await interaction.reply(reply).catch(() => {});
     }
-
-    const unix = Math.floor(date.getTime() / 1000);
-    const stamp = `<t:${unix}:${format}>`;
-    const stampCode = `\`<t:${unix}:${format}>\``;
-
-    const examples = ['d', 'D', 't', 'T', 'f', 'F', 'R'].map(f =>
-      `**${f}**: <t:${unix}:${f}> → \`<t:${unix}:${f}>\``
-    ).join('\n');
-
-    const embed = new EmbedBuilder()
-      .setColor(0xFFD93D)
-      .setTitle('⏰ Timestamp Generator')
-      .addFields(
-        { name: '📥 Fecha', value: date.toISOString(), inline: false },
-        { name: '📤 Tu Timestamp', value: `${stamp}\n${stampCode}`, inline: false },
-        { name: '📋 Todos los formatos', value: examples, inline: false },
-      )
-      .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' });
-
-    await interaction.reply({ embeds: [embed] });
   }
 };

@@ -1,4 +1,5 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { successEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -18,15 +19,12 @@ module.exports = {
         AddReactions: null,
       });
 
-      const embed = new EmbedBuilder()
-        .setColor(0x00FF88)
-        .setTitle('🔓 Canal Desbloqueado')
-        .addFields(
+      const embed = successEmbed('🔓 Canal Desbloqueado', null, {
+        fields: [
           { name: '📢 Canal', value: canal.toString(),     inline: true },
           { name: '👮 Mod',   value: interaction.user.tag, inline: true },
-        )
-        .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })
-        .setTimestamp();
+        ]
+      });
 
       await interaction.reply({ embeds: [embed] });
     } catch (e) {

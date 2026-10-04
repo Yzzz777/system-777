@@ -1,5 +1,6 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const db = require('../../utils/db');
+const { successEmbed, infoEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -29,18 +30,15 @@ module.exports = {
       db.set('guilds', interaction.guild.id, cfg);
 
       await interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(0x00FF88)
-          .setTitle('🛡️ Anti-Nuke ACTIVADO')
-          .setDescription('El servidor está protegido. Si alguien intenta hacer nuke, System 777 revocará sus permisos y los pondrá en timeout.')
-          .addFields(
+        embeds: [successEmbed('🛡️ Anti-Nuke ACTIVADO', 'El servidor está protegido. Si alguien intenta hacer nuke, System 777 revocará sus permisos y los pondrá en timeout.', {
+          fields: [
             { name: '🔨 Límite bans',    value: `${cfg.nukebanLimit} seguidos`,    inline: true },
             { name: '📢 Límite canales', value: `${cfg.nukechannelLimit} borrados`, inline: true },
             { name: '🎭 Límite roles',   value: `${cfg.nukeroleLimit} borrados`,   inline: true },
             { name: '⏱️ Ventana',        value: '15 segundos',                     inline: true },
             { name: '⚡ Respuesta',      value: 'Roles peligrosos removidos + Timeout 24h + Alerta al dueño', inline: false },
-          )
-          .setFooter({ text: 'System 777 · Anti-Nuke · Dev: 777' })],
+          ]
+        })],
         flags: MessageFlags.Ephemeral
       });
 
@@ -51,16 +49,15 @@ module.exports = {
 
     } else if (sub === 'status') {
       await interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(cfg.antinuke ? 0x00FF88 : 0xFF4444)
-          .setTitle('💣 Estado Anti-Nuke')
-          .addFields(
+        embeds: [infoEmbed('💣 Estado Anti-Nuke', null, {
+          color: cfg.antinuke ? 0x00FF88 : 0xFF4444,
+          fields: [
             { name: '🛡️ Estado',         value: cfg.antinuke ? '✅ Activo' : '❌ Inactivo',           inline: true },
             { name: '🔨 Límite bans',    value: `${cfg.nukebanLimit ?? 3}`,                           inline: true },
             { name: '📢 Límite canales', value: `${cfg.nukechannelLimit ?? 2}`,                       inline: true },
             { name: '🎭 Límite roles',   value: `${cfg.nukeroleLimit ?? 2}`,                          inline: true },
-          )
-          .setFooter({ text: 'System 777 · Dev: 777' })],
+          ]
+        })],
         flags: MessageFlags.Ephemeral
       });
     }

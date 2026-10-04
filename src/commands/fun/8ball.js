@@ -1,4 +1,4 @@
-﻿const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 const RESPUESTAS = [
   { text: 'Sí, definitivamente.', color: 0x00FF88 },
@@ -24,18 +24,25 @@ module.exports = {
     .addStringOption(o => o.setName('pregunta').setDescription('Tu pregunta').setRequired(true)),
 
   async execute(interaction) {
-    const pregunta = interaction.options.getString('pregunta');
-    const resp     = RESPUESTAS[Math.floor(Math.random() * RESPUESTAS.length)];
+    try {
+      const pregunta = interaction.options.getString('pregunta');
+      const resp     = RESPUESTAS[Math.floor(Math.random() * RESPUESTAS.length)];
 
-    await interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(resp.color)
-        .setTitle('🎱 La Bola Mágica')
-        .addFields(
-          { name: '❓ Pregunta', value: pregunta },
-          { name: '🎱 Respuesta', value: `**${resp.text}**` }
-        )
-        .setFooter({ text: `System 777 · Developer 777` })]
-    });
+      await interaction.reply({
+        embeds: [new EmbedBuilder()
+          .setColor(resp.color)
+          .setTitle('🎱 La Bola Mágica')
+          .addFields(
+            { name: '❓ Pregunta', value: pregunta },
+            { name: '🎱 Respuesta', value: `**${resp.text}**` }
+          )
+          .setFooter({ text: `System 777 · Developer 777` })]
+      });
+    } catch (error) {
+      console.error('[ERROR] 8ball:', error);
+      const reply = { content: '❌ Error interno del comando.', ephemeral: true };
+      if (interaction.deferred) await interaction.editReply(reply).catch(() => {});
+      else await interaction.reply(reply).catch(() => {});
+    }
   }
 };

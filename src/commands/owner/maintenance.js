@@ -11,6 +11,7 @@ module.exports = {
     .addStringOption(o => o.setName('mensaje').setDescription('Mensaje de mantenimiento').setRequired(false)),
 
   async execute(interaction, client) {
+    try {
     const modo = interaction.options.getString('modo');
     const msg  = interaction.options.getString('mensaje') || 'El bot está en mantenimiento. Vuelve pronto.';
     const on   = modo === 'on';
@@ -25,5 +26,9 @@ module.exports = {
       .setTimestamp();
 
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    } catch (err) {
+      if (interaction.replied || interaction.deferred) return;
+      await interaction.reply({content:`❌ Error: ${err.message}`,flags:MessageFlags.Ephemeral}).catch(()=>{});
+    }
   }
 };

@@ -2243,7 +2243,7 @@ h1{font-size:2em}p{color:#aaa;font-size:1.1em}footer{position:fixed;bottom:16px;
 
     // ── Deploy / VPS ──────────────────────────────────────────────────────────
     if (match(['deploy','desplegar','subir','vps','pm2','reiniciar','restart','servidor','server','ip vps'])) {
-      return `## Deploy y VPS — System 777\n\n**VPS:** 37.60.245.118 | Ubuntu 24.04 | PM2: system-777\n\n**Deploy estándar:**\n\`\`\`\ncd vps_scripts\npython vps_deploy_jarvis2.py\n\`\`\`\n\n**Comandos VPS útiles:**\n\`\`\`bash\npm2 restart system-777\npm2 logs system-777 --lines 30 --nostream\npm2 status\nnode src/deploy-commands.js  # registrar slash commands\n\`\`\`\n\n**Integrity lock** (ejecutar tras subir archivos):\n\`\`\`bash\ncd /root/system-777 && node -e "require('dotenv').config(); const i=require('./src/utils/integrity.js'); if(i.generateLock) i.generateLock(); else if(i.update) i.update();"\n\`\`\`\n\n⚠️ Sin regenerar lock → bot no arranca (\`LOCK_TAMPERED\`)`;
+      return `## Deploy y VPS — System 777\n\n**VPS:** Ubuntu 24.04 | PM2: system-777 (credenciales en notas locales, nunca en código)\n\n**Deploy estándar:**\n\`\`\`\ncd vps_scripts\npython vps_deploy_jarvis2.py\n\`\`\`\n\n**Comandos VPS útiles:**\n\`\`\`bash\npm2 restart system-777\npm2 logs system-777 --lines 30 --nostream\npm2 status\nnode src/deploy-commands.js  # registrar slash commands\n\`\`\`\n\n**Integrity lock** (ejecutar tras subir archivos):\n\`\`\`bash\ncd /root/system-777 && node -e "require('dotenv').config(); const i=require('./src/utils/integrity.js'); if(i.generateLock) i.generateLock(); else if(i.update) i.update();"\n\`\`\`\n\n⚠️ Sin regenerar lock → bot no arranca (\`LOCK_TAMPERED\`)`;
     }
 
     // ── Integrity / Lock ──────────────────────────────────────────────────────
@@ -2258,7 +2258,7 @@ h1{font-size:2em}p{color:#aaa;font-size:1.1em}footer{position:fixed;bottom:16px;
 
     // ── Dashboard ────────────────────────────────────────────────────────────
     if (match(['dashboard','panel','puerto 3000','web panel','interfaz web'])) {
-      return `## Dashboard Web — System 777\n\n**URL:** http://37.60.245.118:3000\n\n**Secciones:**\n- Home — Stats generales\n- Servidores — Lista de guilds\n- Premium — Gestión de planes\n- Staff — Gestión del equipo\n- Analytics — Estadísticas de uso\n- Casos — Logs de moderación\n- Seguridad — Flags de seguridad\n\n**Auth:** OAuth2 Discord (solo el owner tiene acceso completo)\n**Backend:** Express.js, sesiones en memoria`;
+      return `## Dashboard Web — System 777\n\n**URL:** https://jrsystem7777.com\n\n**Secciones:**\n- Home — Stats generales\n- Servidores — Lista de guilds\n- Premium — Gestión de planes\n- Staff — Gestión del equipo\n- Analytics — Estadísticas de uso\n- Casos — Logs de moderación\n- Seguridad — Flags de seguridad\n\n**Auth:** OAuth2 Discord (solo el owner tiene acceso completo)\n**Backend:** Express.js, sesiones en memoria`;
     }
 
     // ── Comandos slash / límite 100 ───────────────────────────────────────────

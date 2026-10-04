@@ -1,5 +1,7 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const logger = require('../../systems/logger');
+const db = require('../../utils/db');
+const { modEmbed } = require('../../utils/embeds');
 
 function parseDur(str) {
   const m = str.match(/^(\d+)(m|h|d)$/i);
@@ -37,25 +39,25 @@ module.exports = {
     }
 
     await interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(0xFF6600)
-        .setTitle('⏱️ Tempban Aplicado')
-        .setThumbnail(target.displayAvatarURL({ size: 128 }))
-        .addFields(
+      embeds: [modEmbed('⏱️ Tempban Aplicado', null, {
+        thumbnail: target.displayAvatarURL({ size: 128 }),
+        fields: [
           { name: '👤 Usuario',   value: `${target.tag}\n\`${target.id}\``, inline: true },
           { name: '⏱️ Duración', value: durStr,                             inline: true },
           { name: '🔓 Unban en', value: `<t:${when}:R>`,                   inline: true },
           { name: '📝 Razón',    value: razon,                              inline: false },
-        )
-        .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })
-        .setTimestamp()]
+        ]
+      })]
     });
 
     await logger.logBan(interaction.guild, target, interaction.user, `Tempban (${durStr}): ${razon}`);
 
-    // Auto-unban
+    // Auto-unban (saved to DB for persistence across restarts)
+    db.set('tempbans', `${interaction.guild.id}_${target.id}`, { expiresAt: Date.now() + ms, reason: razon, duration: durStr });
+
     setTimeout(async () => {
       await interaction.guild.bans.remove(target.id, `Tempban expirado (${durStr})`).catch(() => {});
+      db.del('tempbans', `${interaction.guild.id}_${target.id}`);
     }, ms);
   }
 };

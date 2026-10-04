@@ -1,4 +1,4 @@
-﻿const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -6,6 +6,7 @@ module.exports = {
     .setDescription('📋 Muestra la cola de reproducción'),
 
   async execute(interaction, client) {
+    try {
     const queue = client.player.nodes.get(interaction.guild);
     if (!queue?.isPlaying()) return interaction.reply({ content: '🔇 No hay nada reproduciéndose.', flags: MessageFlags.Ephemeral });
 
@@ -25,5 +26,9 @@ module.exports = {
       .setFooter({ text: `System 777 · Volumen: ${queue.node.volume}%` });
 
     await interaction.reply({ embeds: [embed] });
+    } catch (err) {
+      if (interaction.replied || interaction.deferred) return;
+      await interaction.reply({content:`❌ Error: ${err.message}`,flags:MessageFlags.Ephemeral}).catch(()=>{});
+    }
   }
 };

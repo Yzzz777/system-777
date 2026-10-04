@@ -1,5 +1,7 @@
-﻿const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const sysLogger = require('../../systems/logger');
+const db = require('../../utils/db');
+const { modEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -18,19 +20,21 @@ module.exports = {
     if (!target?.kickable) return interaction.reply({ content: '❌ No puedo expulsar a ese usuario.', flags: MessageFlags.Ephemeral });
 
     await interaction.deferReply();
-    await target.kick(`${reason} | Moderador: ${interaction.user.tag}`);
+    try {
+      await target.kick(`${reason} | Moderador: ${interaction.user.tag}`);
+    } catch (e) {
+      return interaction.editReply({ content: `❌ No pude expulsar: ${e.message}`, flags: MessageFlags.Ephemeral });
+    }
+    db.logActivity(interaction.guild.id, { actionType: 'kick', userId: interaction.user.id, targetId: target.id, details: `Kick: ${target.user.tag} | Razón: ${reason}` });
 
-    const embed = new EmbedBuilder()
-      .setColor(0xFF6600)
-      .setTitle('👢 Usuario Expulsado')
-      .setThumbnail(target.user.displayAvatarURL())
-      .addFields(
+    const embed = modEmbed('👢 Usuario Expulsado', null, {
+      thumbnail: target.user.displayAvatarURL(),
+      fields: [
         { name: 'Usuario',   value: `${target.user.tag} \`(${target.id})\``, inline: true },
         { name: 'Moderador', value: interaction.user.tag,                      inline: true },
         { name: 'Razón',     value: reason }
-      )
-      .setTimestamp()
-      .setFooter({ text: 'System 777 · Developer 777' });
+      ]
+    });
 
     await interaction.editReply({ embeds: [embed] });
     await sysLogger.logKick(interaction.guild, target.user, interaction.user, reason);

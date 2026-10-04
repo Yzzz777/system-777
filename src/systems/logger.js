@@ -1,4 +1,4 @@
-const { EmbedBuilder, AuditLogEvent } = require('discord.js');
+const { EmbedBuilder, AuditLogEvent, ChannelType } = require('discord.js');
 const db = require('../utils/db');
 
 // Config de canales de log por categoría
@@ -15,18 +15,51 @@ const COLORS = {
   join: 0x00CCFF, leave: 0xAAAAAA,
   voice_join: 0x00FF88, voice_leave: 0xFF6666, voice_move: 0xFFAA00,
   role_add: 0xAA00FF, role_remove: 0x7700CC,
-  nick: 0x5865F2, channel_create: 0x00FF88, channel_delete: 0xFF4444,
+  role_create: 0x00FF88, role_update: 0xFFAA00, role_delete: 0xFF4444,
+  nick: 0x5865F2,
+  channel_create: 0x00FF88, channel_delete: 0xFF4444, channel_update: 0xFFAA00,
+  webhook_update: 0x5865F2, guild_update: 0x5865F2,
   invite: 0xFFCC00, flood: 0xFF2222, automod: 0xFF6600,
 };
 
+function findFallbackChannel(guild) {
+  const names = ['bot-logs', 'audit-logs', 'logs', 'log'];
+  for (const name of names) {
+    const ch = guild.channels.cache.find(c => c.name === name && c.isTextBased());
+    if (ch) return ch;
+  }
+  return null;
+}
+
 async function send(guild, category, embed) {
-  const ch = getLogChannel(guild, category);
+  let ch = getLogChannel(guild, category);
+  if (!ch) {
+    ch = findFallbackChannel(guild);
+  }
   if (!ch) return;
+  const perms = ch.permissionsFor(guild.members.me);
+  if (!perms?.has('SendMessages') || !perms?.has('EmbedLinks')) {
+    ch = findFallbackChannel(guild);
+    if (!ch) return;
+  }
   embed
     .setColor(COLORS[category] ?? 0x888888)
     .setTimestamp()
     .setFooter({ text: `System 777 · Logs`, iconURL: guild.client.user.displayAvatarURL({ size: 32 }) });
   await ch.send({ embeds: [embed] }).catch(() => {});
+}
+
+async function fetchAuditEntry(guild, auditType) {
+  try {
+    const logs = await guild.fetchAuditLogs({ type: auditType, limit: 1 });
+    const entry = logs.entries.first();
+    if (!entry || (Date.now() - entry.createdTimestamp) > 10000) return null;
+    return entry;
+  } catch { return null; }
+}
+
+async function logActivitySafe(guild, entry) {
+  try { db.logActivity(guild.id, entry); } catch {}
 }
 
 function saveMod(guildId, entry) {
@@ -233,6 +266,146 @@ async function logChannelDelete(guild, channel) {
     ));
 }
 
+// ── ROLES (create/update) ──────────────────────────────────────
+async function logRoleCreate(guild, role) {
+  const entry = await fetchAuditEntry(guild, AuditLogEvent.RoleCreate);
+  const executor = entry?.executor;
+  await logActivitySafe(guild, {
+    type: 'role_create', executor: executor ? { id: executor.id, tag: executor.tag, avatar: executor.displayAvatarURL?.() } : null,
+    target: { id: role.id, name: role.name, type: 'role' }, timestamp: Date.now(),
+  });
+  const embed = new EmbedBuilder()
+    .setTitle('🎭 Rol Creado')
+    .addFields(
+      { name: '📛 Nombre',  value: role.toString(), inline: true },
+      { name: '🎨 Color',   value: `#${role.color?.toString(16)?.padStart(6, '0') || '000000'}`, inline: true },
+      { name: '🆔 ID',      value: role.id, inline: true },
+      { name: '👤 Creado por', value: executor ? `${executor.tag}\n\`${executor.id}\`` : 'Desconocido', inline: true },
+    );
+  if (role.mentionable) embed.addFields({ name: '📣 Mencionable', value: 'Sí', inline: true });
+  if (role.hoist) embed.addFields({ name: '📌 Separado', value: 'Sí', inline: true });
+  await send(guild, 'role_create', embed);
+}
+
+async function logRoleUpdate(guild, oldRole, newRole) {
+  const changes = [];
+  if (oldRole.name !== newRole.name) changes.push({ before: oldRole.name, after: newRole.name, label: 'Nombre' });
+  if (oldRole.color !== newRole.color) changes.push({ before: `#${oldRole.color?.toString(16)?.padStart(6, '0')}`, after: `#${newRole.color?.toString(16)?.padStart(6, '0')}`, label: 'Color' });
+  if (oldRole.hoist !== newRole.hoist) changes.push({ before: oldRole.hoist ? 'Sí' : 'No', after: newRole.hoist ? 'Sí' : 'No', label: 'Separado' });
+  if (oldRole.mentionable !== newRole.mentionable) changes.push({ before: oldRole.mentionable ? 'Sí' : 'No', after: newRole.mentionable ? 'Sí' : 'No', label: 'Mencionable' });
+  if (oldRole.rawPosition !== newRole.rawPosition) changes.push({ before: oldRole.rawPosition, after: newRole.rawPosition, label: 'Posición' });
+  if (!changes.length) return;
+
+  const entry = await fetchAuditEntry(guild, AuditLogEvent.RoleUpdate);
+  const executor = entry?.executor;
+  await logActivitySafe(guild, {
+    type: 'role_update', executor: executor ? { id: executor.id, tag: executor.tag, avatar: executor.displayAvatarURL?.() } : null,
+    target: { id: newRole.id, name: newRole.name, type: 'role' },
+    details: changes.map(c => ({ field: c.label, before: c.before, after: c.after })),
+    timestamp: Date.now(),
+  });
+  const embed = new EmbedBuilder()
+    .setTitle('🎭 Rol Editado')
+    .addFields(
+      { name: '📛 Rol',     value: newRole.toString(), inline: true },
+      { name: '👤 Editado por', value: executor ? `${executor.tag}\n\`${executor.id}\`` : 'Desconocido', inline: true },
+    );
+  for (const c of changes) {
+    embed.addFields({ name: c.label, value: `**Antes:** ${c.before}\n**Ahora:** ${c.after}`, inline: true });
+  }
+  await send(guild, 'role_update', embed);
+}
+
+// ── CANALES (update) ──────────────────────────────────────────
+async function logChannelUpdate(guild, oldChannel, newChannel) {
+  const changes = [];
+  if (oldChannel.name !== newChannel.name) changes.push({ before: oldChannel.name, after: newChannel.name, label: 'Nombre' });
+  if ((oldChannel.topic || '') !== (newChannel.topic || '')) changes.push({ before: oldChannel.topic || '*vacío*', after: newChannel.topic || '*vacío*', label: 'Tópico' });
+  if ((oldChannel.rateLimitPerUser || 0) !== (newChannel.rateLimitPerUser || 0)) changes.push({ before: `${oldChannel.rateLimitPerUser || 0}s`, after: `${newChannel.rateLimitPerUser || 0}s`, label: 'Slowmode' });
+  if (oldChannel.nsfw !== newChannel.nsfw) changes.push({ before: oldChannel.nsfw ? 'Sí' : 'No', after: newChannel.nsfw ? 'Sí' : 'No', label: 'NSFW' });
+  if (oldChannel.parentId !== newChannel.parentId) changes.push({ before: oldChannel.parentId || 'Ninguna', after: newChannel.parentId || 'Ninguna', label: 'Categoría' });
+  if (!changes.length) return;
+
+  const entry = await fetchAuditEntry(guild, AuditLogEvent.ChannelUpdate);
+  const executor = entry?.executor;
+  await logActivitySafe(guild, {
+    type: 'channel_update', executor: executor ? { id: executor.id, tag: executor.tag, avatar: executor.displayAvatarURL?.() } : null,
+    target: { id: newChannel.id, name: newChannel.name, type: 'channel' },
+    details: changes.map(c => ({ field: c.label, before: c.before, after: c.after })),
+    timestamp: Date.now(),
+  });
+  const embed = new EmbedBuilder()
+    .setTitle('📢 Canal Editado')
+    .addFields(
+      { name: '📢 Canal',     value: newChannel.toString(), inline: true },
+      { name: '📁 Tipo',      value: ChannelType[newChannel.type] || newChannel.type.toString(), inline: true },
+      { name: '👤 Editado por', value: executor ? `${executor.tag}\n\`${executor.id}\`` : 'Desconocido', inline: true },
+    );
+  for (const c of changes) {
+    const val = c.label === 'Tópico'
+      ? `**Antes:** ${c.before.slice(0, 200)}\n**Ahora:** ${c.after.slice(0, 200)}`
+      : `**Antes:** ${c.before}\n**Ahora:** ${c.after}`;
+    embed.addFields({ name: c.label, value: val, inline: true });
+  }
+  await send(guild, 'channel_update', embed);
+}
+
+// ── WEBHOOKS ──────────────────────────────────────────────────
+async function logWebhookUpdate(guild, channel) {
+  const entry = await fetchAuditEntry(guild, AuditLogEvent.WebhookCreate);
+  const executor = entry?.executor;
+  const webhookName = entry?.target?.name || 'Desconocido';
+  await logActivitySafe(guild, {
+    type: 'webhook_update', executor: executor ? { id: executor.id, tag: executor.tag, avatar: executor.displayAvatarURL?.() } : null,
+    target: { id: channel.id, name: channel.name, type: 'channel' },
+    details: { webhookName },
+    timestamp: Date.now(),
+  });
+  const embed = new EmbedBuilder()
+    .setTitle('🪝 Actividad de Webhook')
+    .addFields(
+      { name: '📢 Canal',      value: `<#${channel.id}>`, inline: true },
+      { name: '📛 Webhook',    value: webhookName, inline: true },
+      { name: '👤 Ejecutado por', value: executor ? `${executor.tag}\n\`${executor.id}\`` : 'Desconocido', inline: true },
+    );
+  await send(guild, 'webhook_update', embed);
+}
+
+// ── GUILD (server settings) ───────────────────────────────────
+async function logGuildUpdate(oldGuild, newGuild) {
+  const changes = [];
+  if (oldGuild.name !== newGuild.name) changes.push({ before: oldGuild.name, after: newGuild.name, label: 'Nombre' });
+  if (oldGuild.iconURL() !== newGuild.iconURL()) changes.push({ before: oldGuild.iconURL() || '*ninguno*', after: newGuild.iconURL() || '*ninguno*', label: 'Icono' });
+  if (oldGuild.splashURL() !== newGuild.splashURL()) changes.push({ before: oldGuild.splashURL() || '*ninguno*', after: newGuild.splashURL() || '*ninguno*', label: 'Splash' });
+  if (oldGuild.bannerURL() !== newGuild.bannerURL()) changes.push({ before: oldGuild.bannerURL() || '*ninguno*', after: newGuild.bannerURL() || '*ninguno*', label: 'Banner' });
+  if (oldGuild.verificationLevel !== newGuild.verificationLevel) changes.push({ before: oldGuild.verificationLevel, after: newGuild.verificationLevel, label: 'Nivel de verificación' });
+  if (oldGuild.explicitContentFilter !== newGuild.explicitContentFilter) changes.push({ before: oldGuild.explicitContentFilter, after: newGuild.explicitContentFilter, label: 'Filtro de contenido' });
+  if (oldGuild.systemChannelFlags?.bitfield !== newGuild.systemChannelFlags?.bitfield) changes.push({ before: oldGuild.systemChannelFlags?.bitfield, after: newGuild.systemChannelFlags?.bitfield, label: 'System channel flags' });
+  if (!changes.length) return;
+
+  const entry = await fetchAuditEntry(newGuild, AuditLogEvent.GuildUpdate);
+  const executor = entry?.executor;
+  await logActivitySafe(newGuild, {
+    type: 'guild_update', executor: executor ? { id: executor.id, tag: executor.tag, avatar: executor.displayAvatarURL?.() } : null,
+    target: { id: newGuild.id, name: newGuild.name, type: 'guild' },
+    details: changes.map(c => ({ field: c.label, before: c.before, after: c.after })),
+    timestamp: Date.now(),
+  });
+  const embed = new EmbedBuilder()
+    .setTitle('⚙️ Configuración del Servidor Cambiada')
+    .setThumbnail(newGuild.iconURL({ size: 128 }))
+    .addFields(
+      { name: '🏠 Servidor', value: newGuild.name, inline: true },
+      { name: '👤 Cambiado por', value: executor ? `${executor.tag}\n\`${executor.id}\`` : 'Desconocido', inline: true },
+    );
+  for (const c of changes) {
+    const before = typeof c.before === 'string' && c.before.length > 100 ? c.before.slice(0, 100) + '...' : String(c.before);
+    const after = typeof c.after === 'string' && c.after.length > 100 ? c.after.slice(0, 100) + '...' : String(c.after);
+    embed.addFields({ name: c.label, value: `**Antes:** ${before}\n**Ahora:** ${after}`, inline: true });
+  }
+  await send(newGuild, 'guild_update', embed);
+}
+
 // ── FLOOD (alerta interna) ─────────────────────────────────────
 async function logFlood(guild, user, channel, count) {
   await send(guild, 'flood', new EmbedBuilder()
@@ -266,6 +439,8 @@ module.exports = {
   logBan, logUnban, logKick, logWarn, logTimeout,
   logDelete, logEdit, logJoin, logLeave,
   logNick, logRoleChange, logVoice,
-  logChannelCreate, logChannelDelete,
+  logChannelCreate, logChannelDelete, logChannelUpdate,
+  logRoleCreate, logRoleUpdate,
+  logWebhookUpdate, logGuildUpdate,
   logFlood, dmOwner, getModLogs,
 };

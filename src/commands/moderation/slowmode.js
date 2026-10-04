@@ -1,4 +1,5 @@
-﻿const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { successEmbed, warningEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -14,12 +15,9 @@ module.exports = {
     await interaction.channel.setRateLimitPerUser(seg);
 
     await interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(seg === 0 ? 0x00FF88 : 0xFF9900)
-        .setDescription(seg === 0
-          ? `✅ Slowmode desactivado en <#${interaction.channel.id}>`
-          : `🐢 Slowmode activado: **${seg}s** en <#${interaction.channel.id}>`)
-        .setFooter({ text: 'System 777 · Developer 777' })]
+      embeds: [seg === 0
+        ? successEmbed('🐢 Slowmode Desactivado', `Slowmode desactivado en <#${interaction.channel.id}>`)
+        : warningEmbed('🐢 Slowmode Activado', `Slowmode activado: **${seg}s** en <#${interaction.channel.id}>`)]
     });
   }
 };

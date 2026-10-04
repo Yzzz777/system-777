@@ -16,32 +16,39 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    const text = interaction.options.getString('texto');
-    const mode = interaction.options.getString('modo');
-
-    let result;
     try {
-      if (mode === 'encode') {
-        result = Buffer.from(text, 'utf-8').toString('base64');
-      } else {
-        result = Buffer.from(text, 'base64').toString('utf-8');
-        if (!result || /[\x00-\x08\x0E-\x1F]/.test(result)) {
-          return interaction.reply({ content: '❌ No es un Base64 válido.', flags: MessageFlags.Ephemeral });
+      const text = interaction.options.getString('texto');
+      const mode = interaction.options.getString('modo');
+
+      let result;
+      try {
+        if (mode === 'encode') {
+          result = Buffer.from(text, 'utf-8').toString('base64');
+        } else {
+          result = Buffer.from(text, 'base64').toString('utf-8');
+          if (!result || /[\x00-\x08\x0E-\x1F]/.test(result)) {
+            return interaction.reply({ content: '❌ No es un Base64 válido.', flags: MessageFlags.Ephemeral });
+          }
         }
+      } catch {
+        return interaction.reply({ content: '❌ Error al procesar el texto.', flags: MessageFlags.Ephemeral });
       }
-    } catch {
-      return interaction.reply({ content: '❌ Error al procesar el texto.', flags: MessageFlags.Ephemeral });
+
+      const embed = new EmbedBuilder()
+        .setColor(0x7C3AED)
+        .setTitle('🔐 Base64')
+        .addFields(
+          { name: '📥 Entrada', value: `\`\`\`${text.slice(0, 500)}\`\`\``, inline: false },
+          { name: `📤 ${mode === 'encode' ? 'Codificado' : 'Decodificado'}`, value: `\`\`\`${result.slice(0, 500)}\`\`\``, inline: false },
+        )
+        .setFooter({ text: 'System 777 • jrsystem7777.com' });
+
+      await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+      console.error('[ERROR] base64:', error);
+      const reply = { content: '❌ Error interno del comando.', ephemeral: true };
+      if (interaction.deferred) await interaction.editReply(reply).catch(() => {});
+      else await interaction.reply(reply).catch(() => {});
     }
-
-    const embed = new EmbedBuilder()
-      .setColor(0x7C3AED)
-      .setTitle('🔐 Base64')
-      .addFields(
-        { name: '📥 Entrada', value: `\`\`\`${text.slice(0, 500)}\`\`\``, inline: false },
-        { name: `📤 ${mode === 'encode' ? 'Codificado' : 'Decodificado'}`, value: `\`\`\`${result.slice(0, 500)}\`\`\``, inline: false },
-      )
-      .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' });
-
-    await interaction.reply({ embeds: [embed] });
   }
 };

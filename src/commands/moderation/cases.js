@@ -1,11 +1,12 @@
 const {
-  SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits,
+  SlashCommandBuilder, PermissionFlagsBits,
   MessageFlags, AttachmentBuilder
 } = require('discord.js');
 const db = require('../../utils/db');
+const { createEmbed, COLORS } = require('../../utils/embeds');
 
 const CASE_TYPES  = ['warn', 'mute', 'kick', 'ban', 'note', 'unban', 'unmute', 'watchlist'];
-const TYPE_COLORS = { warn: 0xFFCC00, mute: 0xFF9900, kick: 0xFF6600, ban: 0xFF0000, note: 0x5865F2, unban: 0x00FF88, unmute: 0x00CC66, watchlist: 0xAA00FF };
+const TYPE_COLORS = { warn: COLORS.warning, mute: COLORS.orange, kick: COLORS.error, ban: COLORS.error, note: COLORS.primary, unban: COLORS.success, unmute: COLORS.success, watchlist: 0xAA00FF };
 const TYPE_ICONS  = { warn: '⚠️', mute: '🔇', kick: '👢', ban: '🔨', note: '📝', unban: '✅', unmute: '🔊', watchlist: '👁️' };
 
 function getCases(guildId) { return db.get('mod_cases', guildId) || {}; }
@@ -88,30 +89,30 @@ module.exports = {
       const cfg   = db.get('guilds', guildId, {});
       const logCh = interaction.guild.channels.cache.get(cfg.logChannel);
       if (logCh) {
-        const logEmbed = new EmbedBuilder()
-          .setColor(TYPE_COLORS[tipo] || 0x5865F2)
-          .setTitle(`${TYPE_ICONS[tipo]} Caso #${caseId} — ${tipo.toUpperCase()}`)
-          .addFields(
+        const logEmbed = createEmbed({
+          color: TYPE_COLORS[tipo] || COLORS.primary,
+          title: `${TYPE_ICONS[tipo]} Caso #${caseId} — ${tipo.toUpperCase()}`,
+          fields: [
             { name: 'Usuario',     value: `${user.tag} (\`${user.id}\`)`, inline: true },
             { name: 'Moderador',   value: `${interaction.user.tag}`, inline: true },
             { name: 'Razón',       value: razon, inline: false },
             ...(evidencia ? [{ name: 'Evidencia', value: evidencia, inline: false }] : [])
-          )
-          .setFooter({ text: `System 777 · Caso #${caseId}` })
-          .setTimestamp();
+          ],
+          category: 'moderation'
+        });
         await logCh.send({ embeds: [logEmbed] }).catch(() => {});
       }
 
-      return interaction.editReply({ embeds: [new EmbedBuilder()
-        .setColor(TYPE_COLORS[tipo] || 0x5865F2)
-        .setTitle(`${TYPE_ICONS[tipo]} Caso #${caseId} Creado`)
-        .addFields(
+      return interaction.editReply({ embeds: [createEmbed({
+        color: TYPE_COLORS[tipo] || COLORS.primary,
+        title: `${TYPE_ICONS[tipo]} Caso #${caseId} Creado`,
+        fields: [
           { name: 'Usuario',   value: `${user.tag}`, inline: true },
           { name: 'Tipo',      value: tipo, inline: true },
           { name: 'Razón',     value: razon, inline: false }
-        )
-        .setFooter({ text: `System 777 · Cases · ID #${caseId}` })
-        .setTimestamp()] });
+        ],
+        category: 'moderation'
+      })] });
     }
 
     // ── VIEW ───────────────────────────────────────────────────────────────
@@ -125,10 +126,10 @@ module.exports = {
         ? caso.notes.map(n => `[<t:${Math.floor(n.ts / 1000)}:R>] **${n.modTag}**: ${n.text}`).join('\n').slice(0, 800)
         : 'Sin notas';
 
-      const embed = new EmbedBuilder()
-        .setColor(caso.status === 'closed' ? 0x888888 : (TYPE_COLORS[caso.type] || 0x5865F2))
-        .setTitle(`${TYPE_ICONS[caso.type]} Caso #${caso.id} — ${caso.type.toUpperCase()} [${caso.status.toUpperCase()}]`)
-        .addFields(
+      const embed = createEmbed({
+        color: caso.status === 'closed' ? 0x888888 : (TYPE_COLORS[caso.type] || COLORS.primary),
+        title: `${TYPE_ICONS[caso.type]} Caso #${caso.id} — ${caso.type.toUpperCase()} [${caso.status.toUpperCase()}]`,
+        fields: [
           { name: 'Usuario',    value: `<@${caso.userId}> (\`${caso.userTag}\`)`, inline: true },
           { name: 'Moderador',  value: `<@${caso.modId}>`, inline: true },
           { name: 'Fecha',      value: `<t:${Math.floor(caso.createdAt / 1000)}:F>`, inline: true },
@@ -136,9 +137,9 @@ module.exports = {
           ...(caso.evidence ? [{ name: 'Evidencia', value: caso.evidence, inline: false }] : []),
           ...(caso.resolution ? [{ name: '✅ Resolución', value: caso.resolution, inline: false }] : []),
           { name: `📝 Notas (${caso.notes.length})`, value: notesText, inline: false }
-        )
-        .setFooter({ text: `System 777 · Cases` })
-        .setTimestamp();
+        ],
+        category: 'moderation'
+      });
 
       return interaction.editReply({ embeds: [embed] });
     }
@@ -161,12 +162,12 @@ module.exports = {
         `\`#${String(c.id).padStart(4, '0')}\` ${TYPE_ICONS[c.type]} **${c.type}** — <@${c.userId}> — ${c.reason.slice(0, 40)} — <t:${Math.floor(c.createdAt / 1000)}:R> ${c.status === 'closed' ? '✅' : '🔴'}`
       ).join('\n');
 
-      return interaction.editReply({ embeds: [new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setTitle(`📋 Casos — ${interaction.guild.name} (${entries.length} total)`)
-        .setDescription(lines)
-        .setFooter({ text: `System 777 · Cases · mostrando ${Math.min(15, entries.length)}/${entries.length}` })
-        .setTimestamp()] });
+      return interaction.editReply({ embeds: [createEmbed({
+        color: COLORS.primary,
+        title: `📋 Casos — ${interaction.guild.name} (${entries.length} total)`,
+        description: lines,
+        category: 'moderation'
+      })] });
     }
 
     // ── NOTE ───────────────────────────────────────────────────────────────
@@ -198,11 +199,12 @@ module.exports = {
       cases[id].updatedAt  = Date.now();
       saveCases(guildId, cases);
 
-      return interaction.editReply({ embeds: [new EmbedBuilder()
-        .setColor(0x00FF88)
-        .setTitle(`✅ Caso #${id} Cerrado`)
-        .addFields({ name: 'Resolución', value: resolucion })
-        .setTimestamp()] });
+      return interaction.editReply({ embeds: [createEmbed({
+        color: COLORS.success,
+        title: `✅ Caso #${id} Cerrado`,
+        fields: [{ name: 'Resolución', value: resolucion }],
+        category: 'moderation'
+      })] });
     }
 
     // ── DELETE ─────────────────────────────────────────────────────────────
@@ -235,11 +237,12 @@ module.exports = {
         `\`#${String(c.id).padStart(4, '0')}\` ${TYPE_ICONS[c.type]} **${c.type}** — ${c.userTag} — ${c.reason.slice(0, 50)}`
       ).join('\n');
 
-      return interaction.editReply({ embeds: [new EmbedBuilder()
-        .setColor(0x5865F2)
-        .setTitle(`🔍 Búsqueda: "${query}" — ${results.length} resultados`)
-        .setDescription(lines)
-        .setTimestamp()] });
+      return interaction.editReply({ embeds: [createEmbed({
+        color: COLORS.primary,
+        title: `🔍 Búsqueda: "${query}" — ${results.length} resultados`,
+        description: lines,
+        category: 'moderation'
+      })] });
     }
 
     // ── EXPORT ─────────────────────────────────────────────────────────────
@@ -253,7 +256,12 @@ module.exports = {
       const file   = new AttachmentBuilder(buf, { name: `cases_${guildId}_${Date.now()}.json` });
 
       return interaction.editReply({
-        embeds: [new EmbedBuilder().setColor(0x00FF88).setTitle(`📤 Casos Exportados — ${count} casos`).setDescription(`Tamaño: **${(buf.length / 1024).toFixed(1)} KB**`).setTimestamp()],
+        embeds: [createEmbed({
+          color: COLORS.success,
+          title: `📤 Casos Exportados — ${count} casos`,
+          description: `Tamaño: **${(buf.length / 1024).toFixed(1)} KB**`,
+          category: 'moderation'
+        })],
         files:  [file]
       });
     }

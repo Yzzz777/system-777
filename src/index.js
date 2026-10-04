@@ -5,6 +5,10 @@ const { readdirSync } = require('fs');
 const path   = require('path');
 const logger = require('./utils/logger');
 const { verifyIntegrity } = require('./utils/integrity');
+const { cleanupSecurityMaps } = require('./systems/securityGuard');
+const { cleanupRaidMaps } = require('./systems/antiRaid');
+const { cleanupTracker } = require('./systems/antiNuke');
+const { cleanupShieldMaps } = require('./systems/botShield');
 
 // ── COMPROBACIÓN DE INTEGRIDAD ────────────────────────────────
 {
@@ -99,20 +103,29 @@ for (const file of eventFiles) {
 logger.info(`${eventFiles.length} eventos registrados.`);
 
 // ── MANEJO DE ERRORES & ANTI-CRASH ───────────────────────────
-process.on('unhandledRejection', (reason) => {
-  logger.error(`UnhandledRejection: ${reason?.message || reason}`);
+process.on('unhandledRejection', (reason, promise) => {
+  const msg = reason?.message || reason?.stack || String(reason);
+  console.error(`[UNHANDLED] ${msg}`);
+  logger.error(`Unhandled rejection: ${msg}`);
 });
 
 process.on('uncaughtException', (err) => {
-  logger.error(`UncaughtException: ${err?.message}`);
-  logger.error(err.stack || '');
-  // Errores de red no son críticos
-  if (/ECONNRESET|ETIMEDOUT|ENOTFOUND|EPIPE/.test(err.message)) {
-    logger.warn('Error de red — continuando...');
+  const msg = err?.message || String(err);
+  console.error(`[UNCAUGHT] ${msg}`);
+  console.error(err.stack || '');
+  logger.error(`UncaughtException: ${msg}`);
+
+  if (/ECONNRESET|ETIMEDOUT|ENOTFOUND|EPIPE|EADDRINUSE/.test(msg)) {
+    logger.warn(`Network error (${err.code || 'unknown'}) — continuing...`);
     return;
   }
-  logger.error('Error crítico — reiniciando en 5s...');
-  setTimeout(() => process.exit(1), 5000);
+
+  if (/10062|10013|50001|50013|429/.test(msg) || err.httpStatus === 429) {
+    logger.warn(`Discord API error (${err.code || err.httpStatus || 'unknown'}) — continuing...`);
+    return;
+  }
+
+  logger.error('Critical error — continuing (no restart to avoid loops)...');
 });
 
 // ── SEÑALES DE SISTEMA ────────────────────────────────────────
@@ -129,7 +142,7 @@ async function gracefulShutdown(signal) {
             .setColor(0xFF4444)
             .setTitle('🔴 Bot Reiniciado / Apagado')
             .setDescription(`**System 777** se ha ${signal === 'SIGTERM' ? 'reiniciado' : 'apagado'}.\n\n> Señal: \`${signal}\`\n> Hora: <t:${Math.floor(Date.now()/1000)}:T>\n\nVolverá a estar online en unos segundos.`)
-            .setFooter({ text: 'System 777 · Dev: 777' })
+            .setFooter({ text: 'System 777 • jrsystem7777.com' })
             .setTimestamp()]
         }).catch(() => {});
       }
@@ -157,6 +170,20 @@ setInterval(() => {
     logger.warn(`Memoria alta: ${mb(used)} MB`);
   }
 }, 30 * 60 * 1000);
+
+// Limpieza de Maps cada 5 min
+setInterval(() => {
+  cleanupSecurityMaps();
+  cleanupRaidMaps(client);
+  cleanupTracker();
+  cleanupShieldMaps(client);
+}, 5 * 60 * 1000);
+
+// Limpieza de datos stale cada hora
+setInterval(() => {
+  const db = require('./utils/db');
+  db.cleanup();
+}, 60 * 60 * 1000);
 
 // ── DASHBOARD WEB ─────────────────────────────────────────────
 try {
@@ -196,4 +223,20 @@ if (!process.env.BOT_TOKEN) {
   process.exit(1);
 }
 
-client.login(process.env.BOT_TOKEN);
+// ── LOGIN CON RETRY ─────────────────────────────────────────────
+async function loginWithRetry(attempt = 1) {
+  try {
+    await client.login(process.env.BOT_TOKEN);
+  } catch (err) {
+    const msg = err?.message || '';
+    if (/Not enough sessions|rate.limit|ECONNRESET|ETIMEDOUT/i.test(msg)) {
+      const delay = Math.min(60000, attempt * 15000);
+      logger.warn(`Discord rate limit (intento ${attempt}). Reintentando en ${delay / 1000}s...`);
+      setTimeout(() => loginWithRetry(attempt + 1), delay);
+      return;
+    }
+    logger.error(`Login falló: ${msg}`);
+    setTimeout(() => loginWithRetry(attempt + 1), 30000);
+  }
+}
+loginWithRetry();

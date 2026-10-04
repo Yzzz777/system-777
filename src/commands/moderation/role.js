@@ -1,4 +1,5 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { errorEmbed, successEmbed, infoEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -34,21 +35,16 @@ module.exports = {
 
     if (!isOwnerBot && !isOwnerServer && !isAdmin) {
       return interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(0xFF0000)
-          .setTitle('🔒 Sin Permiso')
-          .setDescription('Solo el **dueño del bot**, **dueño del servidor** o **administradores** pueden gestionar roles.')
-          .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })],
+        embeds: [errorEmbed('🔒 Sin Permiso', 'Solo el **dueño del bot**, **dueño del servidor** o **administradores** pueden gestionar roles.')],
         flags: MessageFlags.Ephemeral
       });
     }
 
     if (sub === 'info') {
       const rol = interaction.options.getRole('rol');
-      const embed = new EmbedBuilder()
-        .setColor(rol.color || 0x5865F2)
-        .setTitle(`🎭 Rol: ${rol.name}`)
-        .addFields(
+      const embed = infoEmbed(`🎭 Rol: ${rol.name}`, null, {
+        color: rol.color || undefined,
+        fields: [
           { name: '🆔 ID',          value: rol.id,                                      inline: true },
           { name: '👥 Miembros',    value: `${rol.members.size}`,                       inline: true },
           { name: '📍 Posición',    value: `${rol.position}`,                           inline: true },
@@ -57,8 +53,8 @@ module.exports = {
           { name: '📎 Separado',    value: rol.hoist ? 'Sí' : 'No',                    inline: true },
           { name: '🛡️ Permisos',   value: rol.permissions.has(PermissionFlagsBits.Administrator) ? 'Administrador' : 'Limitados', inline: true },
           { name: '📅 Creado',      value: `<t:${Math.floor(rol.createdTimestamp / 1000)}:R>`, inline: true },
-        )
-        .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' });
+        ]
+      });
       return interaction.reply({ embeds: [embed] });
     }
 
@@ -97,17 +93,14 @@ module.exports = {
       await member.roles.add(rol, `System 777 · Asignado por ${interaction.user.tag}`);
 
       await interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(rol.color || 0x00FF88)
-          .setTitle('✅ Rol Asignado')
-          .setThumbnail(target.displayAvatarURL({ size: 128 }))
-          .addFields(
+        embeds: [successEmbed('✅ Rol Asignado', null, {
+          thumbnail: target.displayAvatarURL({ size: 128 }),
+          fields: [
             { name: '👤 Usuario', value: `${target} \`(${target.id})\``, inline: true },
             { name: '🎭 Rol',     value: rol.toString(),                  inline: true },
             { name: '👮 Por',     value: interaction.user.tag,            inline: true },
-          )
-          .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })
-          .setTimestamp()]
+          ]
+        })]
       });
 
     } else if (sub === 'remove') {
@@ -118,17 +111,14 @@ module.exports = {
       await member.roles.remove(rol, `System 777 · Quitado por ${interaction.user.tag}`);
 
       await interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(0xFF4444)
-          .setTitle('➖ Rol Quitado')
-          .setThumbnail(target.displayAvatarURL({ size: 128 }))
-          .addFields(
+        embeds: [errorEmbed('➖ Rol Quitado', null, {
+          thumbnail: target.displayAvatarURL({ size: 128 }),
+          fields: [
             { name: '👤 Usuario', value: `${target} \`(${target.id})\``, inline: true },
             { name: '🎭 Rol',     value: rol.toString(),                  inline: true },
             { name: '👮 Por',     value: interaction.user.tag,            inline: true },
-          )
-          .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })
-          .setTimestamp()]
+          ]
+        })]
       });
     }
   }

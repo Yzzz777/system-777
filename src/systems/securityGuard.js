@@ -36,6 +36,8 @@ const TOKEN_REGEX = /[MNO][a-zA-Z0-9_-]{23,27}\.[a-zA-Z0-9_-]{6}\.[a-zA-Z0-9_-]{
 const ZALGO_REGEX = /[̀-ͯ҉᷀-᷿⃐-⃿︠-︯]{4,}/;
 
 // ── Whitelist check ────────────────────────────────────────────────────────
+const { isWhitelistedFor } = require('../commands/protection/whitelist');
+
 function isWhitelisted(message) {
   if (!message.guild) return false;
   const wl = db.get('guilds', message.guild.id, {}).automodWhitelist || {};
@@ -45,6 +47,12 @@ function isWhitelisted(message) {
     if (message.member.roles.cache.some(r => wl.roles.includes(r.id))) return true;
   }
   return false;
+}
+
+function isExempt(message, system) {
+  if (!message.guild) return false;
+  if (isWhitelisted(message)) return true;
+  return isWhitelistedFor(message, system);
 }
 
 // ── Alert system ───────────────────────────────────────────────────────────
@@ -107,7 +115,7 @@ async function applyPunishment(member, guild, reason, client) {
 async function checkPhishing(message, client) {
   const cfg = db.get('guilds', message.guild.id, {});
   if (!cfg.security?.antiPhishing) return false;
-  if (isWhitelisted(message)) return false;
+  if (isExempt(message, 'phishing')) return false;
 
   const matchedPattern = PHISHING_PATTERNS.some(p => p.test(message.content));
   let domain = '';
@@ -134,7 +142,7 @@ async function checkPhishing(message, client) {
 async function checkInviteSpam(message, client) {
   const cfg = db.get('guilds', message.guild.id, {});
   if (!cfg.security?.antiInviteSpam) return false;
-  if (isWhitelisted(message)) return false;
+  if (isExempt(message, 'antilink')) return false;
   if (!DISCORD_INVITE_REGEX.test(message.content)) return false;
   if (message.member?.permissions.has('ManageGuild')) return false;
 
@@ -143,7 +151,7 @@ async function checkInviteSpam(message, client) {
   const data = floodMap.get(key) || { count: 0, firstAt: now };
   if (now - data.firstAt > 60000) { data.count = 0; data.firstAt = now; }
   data.count++;
-  floodMap.set(key, data);
+  floodMap.set(key, { count: data.count, firstAt: data.firstAt });
 
   await message.delete().catch(() => {});
   if (data.count >= 3) {
@@ -184,7 +192,7 @@ async function checkZalgo(message, client) {
   if (!message.content) return false;
   const cfg = db.get('guilds', message.guild.id, {});
   if (!cfg.security?.antiZalgo) return false;
-  if (isWhitelisted(message)) return false;
+  if (isExempt(message, 'antizalgo')) return false;
   if (!ZALGO_REGEX.test(message.content)) return false;
 
   await message.delete().catch(() => {});
@@ -233,6 +241,7 @@ async function checkDuplicate(message, client) {
 // ── Anti-token leak ────────────────────────────────────────────────────────
 async function checkTokenLeak(message, client) {
   if (!message.content) return false;
+  if (isExempt(message, 'antitoken')) return false;
   if (!TOKEN_REGEX.test(message.content)) return false;
 
   await message.delete().catch(() => {});
@@ -251,7 +260,7 @@ async function checkNSFW(message, client) {
   if (!message.content) return false;
   const cfg = db.get('guilds', message.guild.id, {});
   if (!cfg.security?.antiNSFW) return false;
-  if (isWhitelisted(message)) return false;
+  if (isExempt(message, 'antinsfw')) return false;
   if (message.channel.nsfw) return false;
 
   for (const m of [...(message.content).matchAll(URL_REGEX)]) {
@@ -475,6 +484,15 @@ function getUserFlags(userId, guildId) { return (db.get('security_flags', guildI
 function getAlerts(guildId, limit = 20) { return (db.get('security_alerts', guildId) || []).slice(0, limit); }
 function getAltsList(guildId, limit = 30) { return (db.get('security_alts', guildId) || []).slice(0, limit); }
 
+function cleanupSecurityMaps() {
+  const now = Date.now();
+  for (const [k, v] of floodMap) { if (now - (v.firstAt || 0) > 60000) floodMap.delete(k); }
+  for (const [k, v] of mentionMap) { if (now - (v.firstAt || 0) > 60000) mentionMap.delete(k); }
+  for (const [k, v] of attachMap) { if (now - (v.firstAt || 0) > 60000) attachMap.delete(k); }
+  for (const [k, v] of dupeMap) { if (now - (v.firstAt || 0) > 60000) dupeMap.delete(k); }
+  for (const [k, v] of alertCooldown) { if (now - v > 300000) alertCooldown.delete(k); }
+}
+
 module.exports = {
   checkPhishing, checkInviteSpam, checkMassMention,
   checkZalgo, checkDuplicate, checkTokenLeak, checkNSFW, checkAttachmentSpam,
@@ -483,4 +501,5 @@ module.exports = {
   startVPSMonitor, stopVPSMonitor,
   flagUser, applyPunishment, isWhitelisted, sendAlert,
   getUserFlags, getAlerts, getAltsList,
+  cleanupSecurityMaps,
 };

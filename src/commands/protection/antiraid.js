@@ -1,5 +1,6 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const db = require('../../utils/db');
+const { successEmbed, warningEmbed, infoEmbed, errorEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -70,17 +71,14 @@ module.exports = {
       db.set('guilds', gid, cfg);
 
       await interaction.editReply({
-        embeds: [new EmbedBuilder()
-          .setColor(0x00FF88)
-          .setTitle('✅ Anti-Raid Configurado')
-          .addFields(
+        embeds: [successEmbed('✅ Anti-Raid Configurado', 'Usa `/antiraid threshold` y `/antiraid autokick` para configurar umbrales y acciones automáticas.', {
+          fields: [
             { name: '📋 Canal de logs',  value: `<#${logCh.id}>`,                           inline: true },
             { name: '🆕 Cuentas nuevas', value: newAcc ? '✅ Activado' : '❌ Desactivado',  inline: true },
             { name: '👥 Multi-cuenta',   value: multi  ? '✅ Activado' : '❌ Desactivado',  inline: true },
             { name: '🤖 Anti-bots',      value: bots   ? '✅ Activado' : '❌ Desactivado',  inline: true },
-          )
-          .setDescription('Usa `/antiraid threshold` y `/antiraid autokick` para configurar umbrales y acciones automáticas.')
-          .setFooter({ text: 'System 777 · Anti-Raid' })]
+          ]
+        })]
       });
 
     // ── status ───────────────────────────────────────────────────────────────
@@ -92,10 +90,9 @@ module.exports = {
       const levelNames = { 0: '✅ Sin raid', 1: '⚠️ ALERTA', 2: '🔶 SOFT LOCKDOWN', 3: '🔴 HARD LOCKDOWN', 4: '💀 CRITICAL' };
 
       await interaction.editReply({
-        embeds: [new EmbedBuilder()
-          .setColor(state.lockdown ? 0xFF0000 : 0x5865F2)
-          .setTitle('🛡️ Estado Anti-Raid')
-          .addFields(
+        embeds: [infoEmbed('🛡️ Estado Anti-Raid', null, {
+          color: state.lockdown ? 0xFF0000 : undefined,
+          fields: [
             { name: '📡 Estado actual',   value: levelNames[state.level] || '✅ Normal',                 inline: true },
             { name: '🔒 Lockdown',        value: state.lockdown ? '🔒 ACTIVO' : '🔓 Inactivo',          inline: true },
             { name: '👥 Joins recientes', value: `${state.recentJoins}`,                                 inline: true },
@@ -109,8 +106,8 @@ module.exports = {
             { name: '⏱️ Ventana',         value: `${(ar.windowMs ?? 10000) / 1000}s`,                   inline: true },
             { name: '⚡ Auto-acción',     value: ar.autoBan ? '🔨 Auto-ban' : ar.autoKick ? '👢 Auto-kick' : '❌ Desactivado', inline: true },
             { name: '🍯 Honeypot',        value: ar.honeypotChannel ? `<#${ar.honeypotChannel}>` : '❌ Sin configurar', inline: true },
-          )
-          .setFooter({ text: 'System 777 · Anti-Raid' })]
+          ]
+        })]
       });
 
     // ── lockdown ─────────────────────────────────────────────────────────────
@@ -135,13 +132,9 @@ module.exports = {
       db.set('guilds', gid, cfg);
 
       await interaction.editReply({
-        embeds: [new EmbedBuilder()
-          .setColor(canal ? 0xFF9900 : 0x57F287)
-          .setTitle(canal ? '🍯 Honeypot Configurado' : '🍯 Honeypot Desactivado')
-          .setDescription(canal
-            ? `Canal trampa: ${canal}\n\n**Efecto:** Cualquier usuario (no-bot) que envíe un mensaje en ese canal será **baneado automáticamente** y notificado en el canal de logs.\n\n> Pon el canal con permisos visibles para @everyone pero sin permitir hablar — los raiders curiosos caerán solos.`
-            : 'El canal honeypot fue desactivado.')
-          .setFooter({ text: 'System 777 · Anti-Raid · Honeypot' })]
+        embeds: [canal
+          ? warningEmbed('🍯 Honeypot Configurado', `Canal trampa: ${canal}\n\n**Efecto:** Cualquier usuario (no-bot) que envíe un mensaje en ese canal será **baneado automáticamente** y notificado en el canal de logs.\n\n> Pon el canal con permisos visibles para @everyone pero sin permitir hablar — los raiders curiosos caerán solos.`)
+          : successEmbed('🍯 Honeypot Desactivado', 'El canal honeypot fue desactivado.')]
       });
 
     // ── threshold ────────────────────────────────────────────────────────────
@@ -161,16 +154,13 @@ module.exports = {
 
       const ar = cfg.antiRaid;
       await interaction.editReply({
-        embeds: [new EmbedBuilder()
-          .setColor(0x00FF88)
-          .setTitle('⚙️ Umbrales Anti-Raid Actualizados')
-          .addFields(
+        embeds: [successEmbed('⚙️ Umbrales Anti-Raid Actualizados', 'Los cambios toman efecto inmediatamente.', {
+          fields: [
             { name: '⚠️ ALERTA',        value: `${ar.warnThreshold ?? 5} joins/${(ar.windowMs ?? 10000)/1000}s`,  inline: true },
             { name: '🔶 SOFT LOCKDOWN', value: `${ar.softThreshold ?? 8} joins/${(ar.windowMs ?? 10000)/1000}s`,  inline: true },
             { name: '🔴 HARD LOCKDOWN', value: `${ar.hardThreshold ?? 12} joins/${(ar.windowMs ?? 10000)/1000}s`, inline: true },
-          )
-          .setDescription('Los cambios toman efecto inmediatamente.')
-          .setFooter({ text: 'System 777 · Anti-Raid' })]
+          ]
+        })]
       });
 
     // ── autokick ─────────────────────────────────────────────────────────────
@@ -189,11 +179,11 @@ module.exports = {
       };
 
       await interaction.editReply({
-        embeds: [new EmbedBuilder()
-          .setColor(modo === 'ban' ? 0xFF0000 : modo === 'kick' ? 0xFF6600 : 0x57F287)
-          .setTitle('⚡ Acción Anti-Raid Configurada')
-          .setDescription(desc[modo])
-          .setFooter({ text: 'System 777 · Anti-Raid' })]
+        embeds: [modo === 'ban'
+          ? errorEmbed('⚡ Acción Anti-Raid Configurada', desc[modo])
+          : modo === 'kick'
+            ? warningEmbed('⚡ Acción Anti-Raid Configurada', desc[modo])
+            : successEmbed('⚡ Acción Anti-Raid Configurada', desc[modo])]
       });
     }
   }

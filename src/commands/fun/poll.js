@@ -11,6 +11,7 @@ module.exports = {
     .addStringOption(o => o.setName('opcion4').setDescription('Opción D (opcional)')),
 
   async execute(interaction) {
+    try {
     const pregunta = interaction.options.getString('pregunta');
     const opciones = [
       interaction.options.getString('opcion1'),
@@ -28,13 +29,17 @@ module.exports = {
       .setTitle(`📊 ${pregunta}`)
       .setDescription(desc)
       .addFields({ name: 'Creado por', value: interaction.user.toString(), inline: true })
-      .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })
+      .setFooter({ text: 'System 777 • jrsystem7777.com' })
       .setTimestamp();
 
     const msg = await interaction.reply({ embeds: [embed], fetchReply: true });
 
     for (let i = 0; i < opciones.length; i++) {
       await msg.react(emojis[i]);
+    }
+    } catch (err) {
+      if (interaction.replied || interaction.deferred) return;
+      await interaction.reply({content:`❌ Error: ${err.message}`,flags:MessageFlags.Ephemeral}).catch(()=>{});
     }
   }
 };

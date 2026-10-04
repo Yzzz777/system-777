@@ -95,7 +95,10 @@ async function handleJoin(member, client) {
   tracker.push({ ts: now, userId: user.id, username: user.username, accountAge: ageDays });
 
   // Remove joins outside window
-  while (tracker.length && tracker[0].ts < now - cfg.windowMs) tracker.shift();
+  const cutoff = now - cfg.windowMs;
+  for (let i = tracker.length - 1; i >= 0; i--) {
+    if (tracker[i].ts < cutoff) tracker.splice(i, 1);
+  }
 
   const recentCount = tracker.length;
   const recentJoins = [...tracker];
@@ -172,7 +175,7 @@ async function triggerRaid(guild, client, cfg, recentJoins, reason, level) {
       { name: 'Joins recientes', value: `${recentJoins.length}`, inline: true },
       { name: 'Acciones tomadas', value: getActionDesc(level, cfg), inline: true },
     )
-    .setFooter({ text: 'System 777 · Anti-Raid' });
+    .setFooter({ text: 'System 777 • Protección' });
 
   await logger.dmOwner(client, null, embed).catch(() => {});
   if (cfg.logChannel) {
@@ -311,7 +314,7 @@ async function notifyLog(guild, logChannelId, type, member, extra = '') {
         { name: 'ID',            value: member.user.id,                                           inline: true },
         { name: 'Cuenta creada', value: `<t:${Math.floor(member.user.createdTimestamp/1000)}:R>`, inline: true }
       )
-      .setFooter({ text: 'System 777 · Developer 777' }).setTimestamp()
+      .setFooter({ text: 'System 777 • Developer 777' }).setTimestamp()
   ]}).catch(() => {});
 }
 
@@ -324,4 +327,34 @@ function getRaidState(guildId) {
   };
 }
 
-module.exports = { handleJoin, activateLockdown, deactivateLockdown, checkHoneypot, getRaidState, LEVEL };
+function cleanupRaidMaps(client) {
+  const now = Date.now();
+  const windowMs = 60000;
+  for (const [gid, tracker] of joinTracker) {
+    const guild = client?.guilds?.cache?.get(gid);
+    if (!guild) { joinTracker.delete(gid); continue; }
+    for (let i = tracker.length - 1; i >= 0; i--) {
+      if (tracker[i].ts < now - windowMs) tracker.splice(i, 1);
+    }
+    if (tracker.length === 0) joinTracker.delete(gid);
+  }
+  for (const [gid, ipT] of ipJoinTracker) {
+    const guild = client?.guilds?.cache?.get(gid);
+    if (!guild) { ipJoinTracker.delete(gid); continue; }
+    for (const [ip, entries] of Object.entries(ipT)) {
+      ipT[ip] = entries.filter(e => e.ts > now - 60000);
+      if (ipT[ip].length === 0) delete ipT[ip];
+    }
+    if (Object.keys(ipT).length === 0) ipJoinTracker.delete(gid);
+  }
+  for (const [gid] of raidState) {
+    const guild = client?.guilds?.cache?.get(gid);
+    if (!guild) raidState.delete(gid);
+  }
+  for (const [gid] of lockdownState) {
+    const guild = client?.guilds?.cache?.get(gid);
+    if (!guild) lockdownState.delete(gid);
+  }
+}
+
+module.exports = { handleJoin, activateLockdown, deactivateLockdown, checkHoneypot, getRaidState, LEVEL, cleanupRaidMaps };

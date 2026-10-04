@@ -71,106 +71,113 @@ module.exports = {
     .addUserOption(o => o.setName('rival').setDescription('Jugador rival').setRequired(true)),
 
   async execute(interaction) {
-    const rival = interaction.options.getUser('rival');
-    if (rival.id === interaction.user.id) return interaction.reply({ content: '❌ No puedes jugar contra ti mismo.', flags: MessageFlags.Ephemeral });
-    if (rival.bot) return interaction.reply({ content: '❌ Los bots no juegan Connect 4.', flags: MessageFlags.Ephemeral });
+    try {
+      const rival = interaction.options.getUser('rival');
+      if (rival.id === interaction.user.id) return interaction.reply({ content: '❌ No puedes jugar contra ti mismo.', flags: MessageFlags.Ephemeral });
+      if (rival.bot) return interaction.reply({ content: '❌ Los bots no juegan Connect 4.', flags: MessageFlags.Ephemeral });
 
-    const tablero = crearTablero();
-    let turno = 1;
-    const jugadores = { 1: interaction.user.id, 2: rival.id };
+      const tablero = crearTablero();
+      let turno = 1;
+      const jugadores = { 1: interaction.user.id, 2: rival.id };
 
-    const embed = () => new EmbedBuilder()
-      .setColor(0x5865F2)
-      .setTitle('🔴🟡 Connect 4 — System 777')
-      .setDescription(
-        `🔴 **${interaction.user.username}** vs 🟡 **${rival.username}**\n\n` +
-        `Turno: <@${jugadores[turno]}> (${turno === 1 ? '🔴' : '🟡'})`
-      )
-      .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' });
+      const embed = () => new EmbedBuilder()
+        .setColor(0x5865F2)
+        .setTitle('🔴🟡 Connect 4 — System 777')
+        .setDescription(
+          `🔴 **${interaction.user.username}** vs 🟡 **${rival.username}**\n\n` +
+          `Turno: <@${jugadores[turno]}> (${turno === 1 ? '🔴' : '🟡'})`
+        )
+        .setFooter({ text: 'System 777 • jrsystem7777.com' });
 
-    const filas = renderizarTablero(tablero, turno, false);
-    const msg = await interaction.reply({ embeds: [embed()], components: filas, fetchReply: true });
+      const filas = renderizarTablero(tablero, turno, false);
+      const msg = await interaction.reply({ embeds: [embed()], components: filas, fetchReply: true });
 
-    partidas.set(msg.id, { tablero, turno, jugadores, terminado: false });
+      partidas.set(msg.id, { tablero, turno, jugadores, terminado: false });
 
-    const collector = msg.createMessageComponentCollector({ time: 300000 });
+      const collector = msg.createMessageComponentCollector({ time: 300000 });
 
-    collector.on('collect', async btn => {
-      if (btn.user.id !== jugadores[turno]) {
-        return btn.reply({ content: `❌ No es tu turno. Espera a <@${jugadores[turno]}>.`, flags: MessageFlags.Ephemeral });
-      }
-
-      const game = partidas.get(msg.id);
-      if (!game || game.terminado) {
-        return btn.reply({ content: '❌ La partida ya terminó.', flags: MessageFlags.Ephemeral });
-      }
-
-      const [, rStr, cStr] = btn.customId.split('_');
-      const r = parseInt(rStr);
-      const c = parseInt(cStr);
-
-      if (game.tablero[r][c] !== null) {
-        return btn.reply({ content: '❌ Casilla ocupada.', flags: MessageFlags.Ephemeral });
-      }
-
-      let dropRow = -1;
-      for (let row = FILAS - 1; row >= 0; row--) {
-        if (game.tablero[row][c] === null) {
-          dropRow = row;
-          break;
+      collector.on('collect', async btn => {
+        if (btn.user.id !== jugadores[turno]) {
+          return btn.reply({ content: `❌ No es tu turno. Espera a <@${jugadores[turno]}>.`, flags: MessageFlags.Ephemeral });
         }
-      }
 
-      if (dropRow === -1) return btn.reply({ content: '❌ Columna llena.', flags: MessageFlags.Ephemeral });
-
-      game.tablero[dropRow][c] = game.turno;
-
-      const ganador = verificarGanador(game.tablero);
-      const lleno = tableroLleno(game.tablero);
-
-      if (ganador || lleno) {
-        game.terminado = true;
-        collector.stop();
-        partidas.delete(msg.id);
-
-        const ganadorUser = game.jugadores[ganador];
-        const nombreGanador = ganador === 1 ? interaction.user.username : rival.username;
-        const emoji = ganador === 1 ? '🔴' : '🟡';
-
-        const finalEmbed = new EmbedBuilder()
-          .setColor(ganador ? 0x00FF88 : 0xFFAA00)
-          .setTitle(ganador ? '🏆 ¡Ganó Connect 4!' : '🤝 Empate')
-          .setDescription(
-            ganador
-              ? `${emoji} **¡${nombreGanador} ganó!**`
-              : '¡El tablero se llenó sin ganador!'
-          )
-          .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' });
-
-        return btn.update({
-          embeds: [finalEmbed],
-          components: renderizarTablero(game.tablero, game.turno, true)
-        });
-      }
-
-      game.turno = game.turno === 1 ? 2 : 1;
-      await btn.update({ embeds: [embed()], components: renderizarTablero(game.tablero, game.turno, false) });
-    });
-
-    collector.on('end', (_, reason) => {
-      if (reason === 'time' && partidas.has(msg.id)) {
         const game = partidas.get(msg.id);
-        game.terminado = true;
-        partidas.delete(msg.id);
-        msg.edit({
-          embeds: [new EmbedBuilder()
-            .setColor(0xFFAA00)
-            .setTitle('⏰ Tiempo agotado')
-            .setDescription('La partida terminó por inactividad.')
-            .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })],
-          components: renderizarTablero(game.tablero, game.turno, true)
-        }).catch(() => {});
-      }
-    });
+        if (!game || game.terminado) {
+          return btn.reply({ content: '❌ La partida ya terminó.', flags: MessageFlags.Ephemeral });
+        }
+
+        const [, rStr, cStr] = btn.customId.split('_');
+        const r = parseInt(rStr);
+        const c = parseInt(cStr);
+
+        if (game.tablero[r][c] !== null) {
+          return btn.reply({ content: '❌ Casilla ocupada.', flags: MessageFlags.Ephemeral });
+        }
+
+        let dropRow = -1;
+        for (let row = FILAS - 1; row >= 0; row--) {
+          if (game.tablero[row][c] === null) {
+            dropRow = row;
+            break;
+          }
+        }
+
+        if (dropRow === -1) return btn.reply({ content: '❌ Columna llena.', flags: MessageFlags.Ephemeral });
+
+        game.tablero[dropRow][c] = game.turno;
+
+        const ganador = verificarGanador(game.tablero);
+        const lleno = tableroLleno(game.tablero);
+
+        if (ganador || lleno) {
+          game.terminado = true;
+          collector.stop();
+          partidas.delete(msg.id);
+
+          const ganadorUser = game.jugadores[ganador];
+          const nombreGanador = ganador === 1 ? interaction.user.username : rival.username;
+          const emoji = ganador === 1 ? '🔴' : '🟡';
+
+          const finalEmbed = new EmbedBuilder()
+            .setColor(ganador ? 0x00FF88 : 0xFFAA00)
+            .setTitle(ganador ? '🏆 ¡Ganó Connect 4!' : '🤝 Empate')
+            .setDescription(
+              ganador
+                ? `${emoji} **¡${nombreGanador} ganó!**`
+                : '¡El tablero se llenó sin ganador!'
+            )
+            .setFooter({ text: 'System 777 • jrsystem7777.com' });
+
+          return btn.update({
+            embeds: [finalEmbed],
+            components: renderizarTablero(game.tablero, game.turno, true)
+          });
+        }
+
+        game.turno = game.turno === 1 ? 2 : 1;
+        await btn.update({ embeds: [embed()], components: renderizarTablero(game.tablero, game.turno, false) });
+      });
+
+      collector.on('end', (_, reason) => {
+        if (reason === 'time' && partidas.has(msg.id)) {
+          const game = partidas.get(msg.id);
+          game.terminado = true;
+          partidas.delete(msg.id);
+          msg.edit({
+            embeds: [new EmbedBuilder()
+              .setColor(0xFFAA00)
+              .setTitle('⏰ Tiempo agotado')
+              .setDescription('La partida terminó por inactividad.')
+              .setFooter({ text: 'System 777 • jrsystem7777.com' })],
+            components: renderizarTablero(game.tablero, game.turno, true)
+          }).catch(() => {});
+        }
+      });
+    } catch (error) {
+      console.error('[ERROR] connect4:', error);
+      const reply = { content: '❌ Error interno del comando.', ephemeral: true };
+      if (interaction.deferred) await interaction.editReply(reply).catch(() => {});
+      else await interaction.reply(reply).catch(() => {});
+    }
   }
 };

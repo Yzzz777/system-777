@@ -24,14 +24,21 @@ module.exports = {
     .setDescription('🔥 Reto aleatorio'),
 
   async execute(interaction) {
-    const reto = RETOS[Math.floor(Math.random() * RETOS.length)];
+    try {
+      const reto = RETOS[Math.floor(Math.random() * RETOS.length)];
 
-    const embed = new EmbedBuilder()
-      .setColor(0xFF4500)
-      .setTitle('🔥 Reto')
-      .setDescription(`> ${reto}`)
-      .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' });
+      const embed = new EmbedBuilder()
+        .setColor(0xFF4500)
+        .setTitle('🔥 Reto')
+        .setDescription(`> ${reto}`)
+        .setFooter({ text: 'System 777 • jrsystem7777.com' });
 
-    await interaction.reply({ embeds: [embed] });
+      await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+      console.error('[ERROR] dare:', error);
+      const reply = { content: '❌ Error interno del comando.', ephemeral: true };
+      if (interaction.deferred) await interaction.editReply(reply).catch(() => {});
+      else await interaction.reply(reply).catch(() => {});
+    }
   }
 };

@@ -44,26 +44,33 @@ module.exports = {
     .addSubcommand(s => s.setName('reto').setDescription('🔥 Reto aleatorio')),
 
   async execute(interaction) {
-    const sub = interaction.options.getSubcommand();
+    try {
+      const sub = interaction.options.getSubcommand();
 
-    if (sub === 'verdad') {
-      const verdad = VERDADES[Math.floor(Math.random() * VERDADES.length)];
-      return interaction.reply({ embeds: [new EmbedBuilder()
-        .setColor(0x00AAFF)
-        .setTitle('💬 Verdad')
-        .setDescription(`> ${verdad}`)
-        .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })
-      ]});
-    }
+      if (sub === 'verdad') {
+        const verdad = VERDADES[Math.floor(Math.random() * VERDADES.length)];
+        return interaction.reply({ embeds: [new EmbedBuilder()
+          .setColor(0x00AAFF)
+          .setTitle('💬 Verdad')
+          .setDescription(`> ${verdad}`)
+          .setFooter({ text: 'System 777 • jrsystem7777.com' })
+        ]});
+      }
 
-    if (sub === 'reto') {
-      const reto = RETOS[Math.floor(Math.random() * RETOS.length)];
-      return interaction.reply({ embeds: [new EmbedBuilder()
-        .setColor(0xFF4500)
-        .setTitle('🔥 Reto')
-        .setDescription(`> ${reto}`)
-        .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })
-      ]});
+      if (sub === 'reto') {
+        const reto = RETOS[Math.floor(Math.random() * RETOS.length)];
+        return interaction.reply({ embeds: [new EmbedBuilder()
+          .setColor(0xFF4500)
+          .setTitle('🔥 Reto')
+          .setDescription(`> ${reto}`)
+          .setFooter({ text: 'System 777 • jrsystem7777.com' })
+        ]});
+      }
+    } catch (error) {
+      console.error('[ERROR] truth:', error);
+      const reply = { content: '❌ Error interno del comando.', ephemeral: true };
+      if (interaction.deferred) await interaction.editReply(reply).catch(() => {});
+      else await interaction.reply(reply).catch(() => {});
     }
   }
 };

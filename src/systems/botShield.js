@@ -173,6 +173,18 @@ async function _alertOwner(description, color = 0xFF9900, guild = null) {
   } catch {}
 }
 
+function cleanupShieldMaps(client) {
+  const now = Date.now();
+  for (const [key, list] of modActionLog) {
+    modActionLog.set(key, list.filter(ts => now - ts < RATE_LIMIT_WINDOW));
+    if (modActionLog.get(key).length === 0) modActionLog.delete(key);
+  }
+  for (const [gid] of securityBotsInGuild) {
+    const guild = client?.guilds?.cache?.get(gid);
+    if (!guild) securityBotsInGuild.delete(gid);
+  }
+}
+
 module.exports = {
   init,
   trackAction,
@@ -181,4 +193,5 @@ module.exports = {
   onBanAdd,
   scanGuildOnJoin,
   hasSecurityBot,
+  cleanupShieldMaps,
 };

@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const db     = require('../../utils/db');
 const logger = require('../../utils/logger');
+const ipBan  = require('../../systems/ipBan');
 
 module.exports = {
   ownerOnly: true,
@@ -51,7 +52,13 @@ module.exports = {
       .addStringOption(o => o.setName('id').setDescription('User ID').setRequired(true)))
     .addSubcommand(s => s
       .setName('ipscan')
-      .setDescription('[OWNER] Escanear todos los miembros del servidor y enviar IPs conocidas al DM')),
+      .setDescription('[OWNER] Escanear todos los miembros del servidor y enviar IPs conocidas al DM'))
+    .addSubcommand(s => s
+      .setName('ipaudit')
+      .setDescription('Ver historial de acciones IP (bans, unbans, auto-bans)'))
+    .addSubcommand(s => s
+      .setName('ipstats')
+      .setDescription('Ver estadísticas del sistema de IP bans')),
 
   async execute(interaction, client) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -88,7 +95,7 @@ module.exports = {
             { name: 'Razón',                value: reason,      inline: true },
             { name: 'Servidores afectados', value: `${count}`,  inline: true }
           )
-          .setFooter({ text: 'System 777 · Developer 777' })]
+          .setFooter({ text: 'System 777 • Developer 777' })]
       });
 
     // ── remove ───────────────────────────────────────────────────────────────
@@ -123,7 +130,7 @@ module.exports = {
           .setColor(0xFF0000)
           .setTitle(`⛔ Bans Globales (${entries.length}) — 🔒 = permanente`)
           .setDescription(desc)
-          .setFooter({ text: 'System 777 · Developer 777' })]
+          .setFooter({ text: 'System 777 • Developer 777' })]
       });
 
     // ── link ─────────────────────────────────────────────────────────────────
@@ -176,7 +183,7 @@ module.exports = {
             { name: 'Baneada en',                 value: `${count} servidores`, inline: true },
             { name: 'Efecto',                     value: 'Si esta alt intenta entrar a cualquier servidor, será baneada automáticamente.' }
           )
-          .setFooter({ text: 'System 777 · Developer 777' })]
+          .setFooter({ text: 'System 777 • Developer 777' })]
       });
 
     // ── unlink ───────────────────────────────────────────────────────────────
@@ -208,7 +215,7 @@ module.exports = {
           .setColor(0xFF4400)
           .setTitle(`🔗 Alts vinculadas a \`${userId}\` (${alts.length})`)
           .setDescription(desc)
-          .setFooter({ text: 'System 777 · Developer 777' })]
+          .setFooter({ text: 'System 777 • Developer 777' })]
       });
 
     // ── ipban ─────────────────────────────────────────────────────────────────
@@ -216,109 +223,169 @@ module.exports = {
       const objetivo = interaction.options.getString('objetivo').trim();
       const reason   = interaction.options.getString('razon');
 
-      // Detect if objetivo is an IP address or a User ID
       const isIp = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(objetivo);
       let ipsToban = [];
 
       if (isIp) {
         ipsToban = [objetivo];
       } else {
-        // Treat as User ID — look up their IPs from registry
-        const uips = db.get('ip_registry', 'user_ips', {});
-        ipsToban   = uips[objetivo] || [];
+        // User ID → buscar IPs del registro
+        const userIps = ipBan.getUserIps(objetivo);
+        ipsToban = userIps.map(u => u.ip);
         if (!ipsToban.length) {
           return interaction.editReply({
-            content: `❌ No hay IPs registradas para \`${objetivo}\`.\n> El usuario nunca hizo clic en el link de tracking o verificación.`
+            content: `❌ No hay IPs registradas para \`${objetivo}\`.\n> El usuario nunca hizo clic en el link de tracking.`
           });
         }
       }
 
-      const bannedIps = db.get('ip_registry', 'banned_ips', {});
-      const reg       = db.get('ip_registry', 'data', {});
-      const gbans     = db.get('globalbans', 'users', {});
       let totalUsers = 0, totalGuildBans = 0;
       const ipsBanned = [];
+      const lookups = [];
+      const startTime = Date.now();
+      const TIMEOUT_MS = 13 * 60 * 1000;
+      let timedOut = false;
 
       for (const ip of ipsToban) {
-        bannedIps[ip] = { reason, ts: Date.now(), bannedBy: interaction.user.id };
+        if (Date.now() - startTime > TIMEOUT_MS) { timedOut = true; break; }
+
+        const banEntry = ipBan.banIp(ip, reason, interaction.user.id);
         ipsBanned.push(ip);
+
+        const lookup = await ipBan.lookupIp(ip).catch(() => null);
+        if (lookup) {
+          lookups.push(lookup);
+          banEntry.lookup = lookup;
+          const bannedIps = db.get('ip_registry', 'banned_ips', {});
+          bannedIps[ip] = banEntry;
+          db.set('ip_registry', 'banned_ips', bannedIps);
+        }
+
+        const reg = db.get('ip_registry', 'data', {});
         const usersOnIp = reg[ip] || [];
         totalUsers += usersOnIp.length;
+        const gbans = db.get('globalbans', 'users', {});
         for (const userId of usersOnIp) {
-          gbans[userId] = { reason: `IP Ban (${ip}): ${reason}`, bannedBy: 'system', ts: Date.now(), permanent: true };
+          gbans[userId] = { reason: `IP Ban (${ip}): ${reason}`, bannedBy: interaction.user.id, ts: Date.now(), permanent: true };
+        }
+        if (usersOnIp.length) db.set('globalbans', 'users', gbans);
+
+        const banPromises = [];
+        for (const userId of usersOnIp) {
           for (const guild of client.guilds.cache.values()) {
-            try { await guild.bans.create(userId, { reason: `System 777 · IP Ban: ${reason}` }); totalGuildBans++; } catch {}
+            banPromises.push(
+              guild.bans.create(userId, { reason: `System 777 · IP Ban: ${reason}` })
+                .then(() => { totalGuildBans++; })
+                .catch(() => {})
+            );
           }
         }
+
+        for (let i = 0; i < banPromises.length; i += 10) {
+          if (Date.now() - startTime > TIMEOUT_MS) { timedOut = true; break; }
+          await Promise.all(banPromises.slice(i, i + 10));
+        }
+        if (timedOut) break;
       }
-      db.set('ip_registry', 'banned_ips', bannedIps);
-      if (totalUsers) db.set('globalbans', 'users', gbans);
-      logger.warn(`IP Ban: ${ipsBanned.join(', ')} — ${totalUsers} usuarios, ${totalGuildBans} guild bans. Razón: ${reason}`);
+
+      logger.warn(`IP Ban: ${ipsBanned.join(', ')} — ${totalUsers} usuarios, ${totalGuildBans} guild bans. Razón: ${reason}${timedOut ? ' (timeout parcial)' : ''}`);
+
+      const lookupInfo = lookups.length
+        ? lookups.map(l => `**${l.ip}** → ${l.city || '?'}, ${l.country || '?'} · ISP: ${l.isp || '?'} · AS: ${l.as || '?'}`).join('\n')
+        : 'Sin datos de ubicación';
 
       await interaction.editReply({
         embeds: [new EmbedBuilder()
           .setColor(0xFF0000)
-          .setTitle('🌐 IP(s) Baneada(s)')
+          .setTitle(`🌐 IP(s) Baneada(s)${timedOut ? ' ⏱️ (parcial)' : ''}`)
           .addFields(
-            { name: 'IPs baneadas',    value: ipsBanned.map(ip => `\`${ip}\``).join('\n') || '-', inline: true },
+            { name: 'IPs baneadas',      value: ipsBanned.map(ip => `\`${ip}\``).join('\n') || '-', inline: true },
             { name: 'Cuentas afectadas', value: `${totalUsers}`,   inline: true },
-            { name: 'Guild bans',       value: `${totalGuildBans}`, inline: true },
-            { name: 'Razón',            value: reason },
-            { name: 'Efecto',           value: 'Cuentas baneadas globalmente. Cualquier acceso futuro desde estas IPs es rechazado automáticamente.' }
+            { name: 'Guild bans',        value: `${totalGuildBans}`, inline: true },
+            { name: '📍 Lookup',         value: lookupInfo,        inline: false },
+            { name: '📝 Razón',          value: reason,            inline: false },
+            { name: '⚡ Efecto',         value: timedOut
+              ? '⚠️ Timeout parcial: se procesaron las IPs en los primeros 13 minutos. Las cuentas registradas en DB ya están baneadas globalmente.'
+              : 'Cuentas baneadas globalmente. Acceso futuro desde estas IPs será rechazado automáticamente.' }
           )
-          .setFooter({ text: 'System 777 · Developer 777' })]
+          .setFooter({ text: 'System 777 · Developer 777 · IP Ban System' })
+          .setTimestamp()]
       });
 
     // ── ipunban ───────────────────────────────────────────────────────────────
     } else if (sub === 'ipunban') {
-      const ip        = interaction.options.getString('ip');
-      const bannedIps = db.get('ip_registry', 'banned_ips', {});
-      if (!bannedIps[ip]) return interaction.editReply({ content: `❌ \`${ip}\` no está baneada.` });
-      delete bannedIps[ip];
-      db.set('ip_registry', 'banned_ips', bannedIps);
-      await interaction.editReply({ content: `✅ IP \`${ip}\` desbloqueada.` });
+      const ip = interaction.options.getString('ip');
+      const result = ipBan.unbanIp(ip, interaction.user.id);
+      if (!result) return interaction.editReply({ content: `❌ \`${ip}\` no está baneada.` });
+
+      let unbannedUsers = '';
+      if (result.unbannedCount > 0) {
+        // Desbanear de Discord
+        for (const [userId, gban] of Object.entries(db.get('globalbans', 'users', {}))) {
+          if (gban.reason?.includes(`IP Ban (${ip})`)) {
+            for (const guild of client.guilds.cache.values()) {
+              try { await guild.bans.remove(userId, `System 777 · IP Unban: ${ip}`); } catch {}
+            }
+          }
+        }
+        unbannedUsers = `\n**${result.unbannedCount}** cuentas desbaneadas de Discord.`;
+      }
+
+      logger.info(`IP Unban: ${ip} por ${interaction.user.tag}. ${result.unbannedCount} cuentas desbaneadas.`);
+      await interaction.editReply({
+        embeds: [new EmbedBuilder()
+          .setColor(0x57F287)
+          .setTitle('✅ IP Desbloqueada')
+          .setDescription(`IP \`${ip}\` desbloqueada correctamente.${unbannedUsers}`)
+          .addFields(
+            { name: 'IP',        value: `\`${ip}\``,        inline: true },
+            { name: 'Razón original', value: result.originalBan.reason || '-', inline: true },
+            { name: 'Baneada por',    value: `<@${result.originalBan.bannedBy}>`, inline: true },
+          )
+          .setFooter({ text: 'System 777 • Developer 777' })
+          .setTimestamp()]
+      });
 
     // ── iplist ────────────────────────────────────────────────────────────────
     } else if (sub === 'iplist') {
-      const bannedIps = db.get('ip_registry', 'banned_ips', {});
-      const entries   = Object.entries(bannedIps);
-      const desc = entries.length
-        ? entries.map(([ip, d]) => `\`${ip}\` — ${d.reason} (<t:${Math.floor(d.ts/1000)}:R>)`).join('\n').slice(0, 2000)
+      const banned = ipBan.getBannedIps();
+      const desc = banned.length
+        ? banned.map(d => {
+            const loc = d.lookup ? ` · ${d.lookup.city || ''}, ${d.lookup.country || ''}` : '';
+            return `\`${d.ip}\` — ${d.reason}${loc} (<t:${Math.floor(d.ts/1000)}:R>)`;
+          }).join('\n').slice(0, 2000)
         : 'No hay IPs baneadas.';
       await interaction.editReply({
         embeds: [new EmbedBuilder()
           .setColor(0xFF0000)
-          .setTitle(`🌐 IPs Baneadas (${entries.length})`)
+          .setTitle(`🌐 IPs Baneadas (${banned.length})`)
           .setDescription(desc)
-          .setFooter({ text: 'System 777 · Developer 777' })]
+          .setFooter({ text: 'System 777 · Developer 777 · IP Ban System' })]
       });
 
     // ── ipcheck ───────────────────────────────────────────────────────────────
     } else if (sub === 'ipcheck') {
-      const userId = interaction.options.getString('id');
-      const uips   = db.get('ip_registry', 'user_ips', {});
-      const reg    = db.get('ip_registry', 'data', {});
-      const ips    = uips[userId] || [];
+      const userId  = interaction.options.getString('id');
+      const userIps = ipBan.getUserIps(userId);
 
-      if (!ips.length) {
+      if (!userIps.length) {
         return interaction.editReply({ content: `❌ \`${userId}\` no ha verificado aún — no hay IPs registradas.` });
       }
 
-      const bannedIps = db.get('ip_registry', 'banned_ips', {});
       let desc = '';
-      for (const ip of ips) {
-        const isBanned = bannedIps[ip] ? '🔴 BANEADA' : '🟢 libre';
-        const accounts = (reg[ip] || []).filter(id => id !== userId);
-        desc += `**\`${ip}\`** ${isBanned}\n`;
-        if (accounts.length) desc += `  └ Otras cuentas: ${accounts.map(id => `\`${id}\``).join(', ')}\n`;
+      for (const entry of userIps) {
+        const status = entry.isBanned ? '🔴 BANEADA' : '🟢 libre';
+        desc += `**\`${entry.ip}\`** ${status}\n`;
+        if (entry.banReason) desc += `  └ Razón: ${entry.banReason}\n`;
+        if (entry.otherUsers.length) desc += `  └ Otras cuentas: ${entry.otherUsers.map(id => `\`${id}\``).join(', ')}\n`;
       }
 
       await interaction.editReply({
         embeds: [new EmbedBuilder()
           .setColor(0xFF4400)
-          .setTitle(`🌐 IPs de \`${userId}\` (${ips.length})`)
+          .setTitle(`🌐 IPs de \`${userId}\` (${userIps.length})`)
           .setDescription(desc.slice(0, 2000) || 'Sin datos')
-          .setFooter({ text: 'System 777 · Developer 777' })]
+          .setFooter({ text: 'System 777 · Developer 777 · IP Ban System' })]
       });
 
     // ── ipscan ─────────────────────────────────────────────────────────────
@@ -376,6 +443,44 @@ module.exports = {
       } catch {
         await interaction.editReply({ content: '❌ No pude enviarte el DM. Asegúrate de tener los DMs abiertos.' });
       }
+
+    // ── ipaudit ─────────────────────────────────────────────────────────────
+    } else if (sub === 'ipaudit') {
+      const audit = ipBan.getAuditLog(25);
+      const desc = audit.length
+        ? audit.map(e => {
+            const action = { ip_ban: '🔴 IP BAN', ip_unban: '🟢 IP UNBAN', auto_ban_on_join: '⚡ AUTO-BAN JOIN' }[e.action] || e.action;
+            const who = e.bannedBy ? `<@${e.bannedBy}>` : e.unbannedBy ? `<@${e.unbannedBy}>` : 'system';
+            const loc = e.lookup ? ` · ${e.lookup.city || ''}, ${e.lookup.country || ''}` : '';
+            return `${action} \`${e.ip}\`${loc}\n  por ${who} — ${e.reason || ''} (<t:${Math.floor(e.ts/1000)}:R>)`;
+          }).join('\n\n').slice(0, 2000)
+        : 'Sin registros de auditoría.';
+
+      await interaction.editReply({
+        embeds: [new EmbedBuilder()
+          .setColor(0xFF9900)
+          .setTitle(`📋 Auditoría IP Bans (${audit.length} entradas recientes)`)
+          .setDescription(desc)
+          .setFooter({ text: 'System 777 · IP Audit Log' })
+          .setTimestamp()]
+      });
+
+    // ── ipstats ─────────────────────────────────────────────────────────────
+    } else if (sub === 'ipstats') {
+      const stats = ipBan.getStats();
+      await interaction.editReply({
+        embeds: [new EmbedBuilder()
+          .setColor(0x5865F2)
+          .setTitle('📊 Estadísticas IP Ban System')
+          .addFields(
+            { name: '🔴 IPs Baneadas',     value: `${stats.totalBannedIps}`,   inline: true },
+            { name: '👤 Usuarios rastreados', value: `${stats.totalTrackedUsers}`, inline: true },
+            { name: '🌐 IPs registradas',    value: `${stats.totalTrackedIps}`,  inline: true },
+            { name: '📋 Entradas auditoría', value: `${stats.totalAuditEntries}`, inline: true },
+          )
+          .setFooter({ text: 'System 777 · IP Ban Stats' })
+          .setTimestamp()]
+      });
     }
   }
 };

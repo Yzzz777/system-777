@@ -33,7 +33,7 @@ function buildEmbed(gw, participantes) {
     embed.addFields({ name: '🏆 Ganadores', value: gw.winnerIds.map(id => `<@${id}>`).join(', ') });
   }
 
-  embed.setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' }).setTimestamp();
+  embed.setFooter({ text: 'System 777 • jrsystem7777.com' }).setTimestamp();
   return embed;
 }
 
@@ -88,7 +88,7 @@ async function pickWinners(client, gwId) {
             `**Premio:** ${gw.prize}\n\n` +
             winners.map(id => `🏆 <@${id}>`).join('\n')
           )
-          .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })
+          .setFooter({ text: 'System 777 • jrsystem7777.com' })
           .setTimestamp()]
       });
 
@@ -104,7 +104,7 @@ async function pickWinners(client, gwId) {
                 { name: '🎁 Premio',   value: gw.prize },
                 { name: '🏠 Servidor', value: `ID: ${gw.guildId}` },
               )
-              .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })]
+              .setFooter({ text: 'System 777 • jrsystem7777.com' })]
           });
         } catch {}
       }

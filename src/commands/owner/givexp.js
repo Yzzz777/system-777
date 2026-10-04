@@ -10,6 +10,7 @@ module.exports = {
     .addIntegerOption(o => o.setName('cantidad').setDescription('XP (negativo para quitar)').setRequired(true)),
 
   async execute(interaction) {
+    try {
     const target   = interaction.options.getUser('usuario');
     const cantidad = interaction.options.getInteger('cantidad');
     const key      = `${target.id}_${interaction.guild.id}`;
@@ -31,5 +32,9 @@ module.exports = {
         .setFooter({ text: 'System 777 · Owner Only 👑' })],
       flags: MessageFlags.Ephemeral
     });
+    } catch (err) {
+      if (interaction.replied || interaction.deferred) return;
+      await interaction.reply({content:`❌ Error: ${err.message}`,flags:MessageFlags.Ephemeral}).catch(()=>{});
+    }
   }
 };

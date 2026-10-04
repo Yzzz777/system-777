@@ -1,4 +1,4 @@
-﻿const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -22,6 +22,7 @@ module.exports = {
     .addSubcommand(s => s.setName('nowplaying').setDescription('🎵 Muestra la canción actual')),
 
   async execute(interaction, client) {
+    try {
     const sub   = interaction.options.getSubcommand();
     const queue = client.player.nodes.get(interaction.guild);
 
@@ -76,8 +77,12 @@ module.exports = {
           { name: '⏱️ Duración', value: t.duration || '?',      inline: true },
           { name: '🔊 Volumen',  value: `${queue.node.volume}%`, inline: true },
         )
-        .setFooter({ text: 'System 777 · Developer 777' });
+        .setFooter({ text: 'System 777 • Developer 777' });
       return interaction.reply({ embeds: [embed] });
+    }
+    } catch (err) {
+      if (interaction.replied || interaction.deferred) return;
+      await interaction.reply({content:`❌ Error: ${err.message}`,flags:MessageFlags.Ephemeral}).catch(()=>{});
     }
   }
 };

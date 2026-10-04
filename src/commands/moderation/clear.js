@@ -1,4 +1,5 @@
-﻿const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { successEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -23,10 +24,7 @@ module.exports = {
     const deleted = await interaction.channel.bulkDelete(filtered, true);
 
     await interaction.editReply({
-      embeds: [new EmbedBuilder()
-        .setColor(0x00CCFF)
-        .setDescription(`🗑️ ${deleted.size} mensajes eliminados${target ? ` de **${target.tag}**` : ''}.`)
-        .setFooter({ text: 'System 777 · Developer 777' })]
+      embeds: [successEmbed('🗑️ Mensajes Eliminados', `${deleted.size} mensajes eliminados${target ? ` de **${target.tag}**` : ''}.`)]
     });
   }
 };

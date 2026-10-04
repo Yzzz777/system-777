@@ -7,31 +7,38 @@ module.exports = {
     .addStringOption(o => o.setName('hex').setDescription('Código hex (ej: #FF5733 o FF5733)').setRequired(true)),
 
   async execute(interaction) {
-    let hex = interaction.options.getString('hex').replace('#', '');
+    try {
+      let hex = interaction.options.getString('hex').replace('#', '');
 
-    if (!/^[0-9A-Fa-f]{6}$/.test(hex)) {
-      return interaction.reply({ content: '❌ Código hex inválido. Usa formato: `FF5733` o `#FF5733`', flags: MessageFlags.Ephemeral });
+      if (!/^[0-9A-Fa-f]{6}$/.test(hex)) {
+        return interaction.reply({ content: '❌ Código hex inválido. Usa formato: `FF5733` o `#FF5733`', flags: MessageFlags.Ephemeral });
+      }
+
+      const r = parseInt(hex.slice(0, 2), 16);
+      const g = parseInt(hex.slice(2, 4), 16);
+      const b = parseInt(hex.slice(4, 6), 16);
+
+      const hsl = rgbToHsl(r, g, b);
+
+      const embed = new EmbedBuilder()
+        .setColor(parseInt(hex, 16))
+        .setTitle(`🎨 Color #${hex.toUpperCase()}`)
+        .setDescription(`█`.repeat(20))
+        .addFields(
+          { name: '🔴 RGB', value: `R: ${r} · G: ${g} · B: ${b}`, inline: true },
+          { name: '🌈 HSL', value: `H: ${hsl.h}° · S: ${hsl.s}% · L: ${hsl.l}%`, inline: true },
+          { name: '📦 Decimal', value: `${parseInt(hex, 16)}`, inline: true },
+          { name: '🔗 CSS', value: `\`#${hex.toUpperCase()}\` · \`rgb(${r},${g},${b})\``, inline: false },
+        )
+        .setFooter({ text: 'System 777 • jrsystem7777.com' });
+
+      await interaction.reply({ embeds: [embed] });
+    } catch (error) {
+      console.error('[ERROR] color:', error);
+      const reply = { content: '❌ Error interno del comando.', ephemeral: true };
+      if (interaction.deferred) await interaction.editReply(reply).catch(() => {});
+      else await interaction.reply(reply).catch(() => {});
     }
-
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-
-    const hsl = rgbToHsl(r, g, b);
-
-    const embed = new EmbedBuilder()
-      .setColor(parseInt(hex, 16))
-      .setTitle(`🎨 Color #${hex.toUpperCase()}`)
-      .setDescription(`█`.repeat(20))
-      .addFields(
-        { name: '🔴 RGB', value: `R: ${r} · G: ${g} · B: ${b}`, inline: true },
-        { name: '🌈 HSL', value: `H: ${hsl.h}° · S: ${hsl.s}% · L: ${hsl.l}%`, inline: true },
-        { name: '📦 Decimal', value: `${parseInt(hex, 16)}`, inline: true },
-        { name: '🔗 CSS', value: `\`#${hex.toUpperCase()}\` · \`rgb(${r},${g},${b})\``, inline: false },
-      )
-      .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' });
-
-    await interaction.reply({ embeds: [embed] });
   }
 };
 

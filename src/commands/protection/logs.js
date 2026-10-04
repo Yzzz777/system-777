@@ -1,5 +1,6 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const db = require('../../utils/db');
+const { successEmbed, infoEmbed } = require('../../utils/embeds');
 
 const CATEGORIAS = {
   mod:          { label: '🔨 Moderación',       desc: 'Ban, kick, warn, timeout' },
@@ -67,14 +68,12 @@ module.exports = {
       db.set('guilds', interaction.guild.id, cfg);
 
       await interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(0x00FF88)
-          .setTitle('✅ Log Configurado')
-          .addFields(
+        embeds: [successEmbed('✅ Log Configurado', null, {
+          fields: [
             { name: '📋 Categoría', value: CATEGORIAS[cat].label, inline: true },
             { name: '📢 Canal',     value: canal.toString(),       inline: true },
-          )
-          .setFooter({ text: 'System 777 · Dev: 777' })],
+          ]
+        })],
         flags: MessageFlags.Ephemeral
       });
 
@@ -85,11 +84,7 @@ module.exports = {
       db.set('guilds', interaction.guild.id, cfg);
 
       await interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(0x00FF88)
-          .setTitle('✅ Todos los Logs Configurados')
-          .setDescription(`Todas las categorías → ${canal}`)
-          .setFooter({ text: 'System 777 · Dev: 777' })],
+        embeds: [successEmbed('✅ Todos los Logs Configurados', `Todas las categorías → ${canal}`)],
         flags: MessageFlags.Ephemeral
       });
 
@@ -108,11 +103,7 @@ module.exports = {
       });
 
       await interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setTitle('📋 Configuración de Logs — System 777')
-          .setDescription(lines.join('\n'))
-          .setFooter({ text: 'System 777 · Dev: 777' })],
+        embeds: [infoEmbed('📋 Configuración de Logs — System 777', lines.join('\n'))],
         flags: MessageFlags.Ephemeral
       });
     }

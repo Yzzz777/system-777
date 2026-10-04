@@ -17,7 +17,7 @@ module.exports = {
       .setDescription(msg)
       .setThumbnail(client.user.displayAvatarURL())
       .setTimestamp()
-      .setFooter({ text: 'System 777 · Developer 777' });
+      .setFooter({ text: 'System 777 • Developer 777' });
 
     let ok = 0, fail = 0;
     for (const guild of client.guilds.cache.values()) {

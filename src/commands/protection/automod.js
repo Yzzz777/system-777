@@ -1,8 +1,9 @@
 const {
-  SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags,
+  SlashCommandBuilder, PermissionFlagsBits, MessageFlags,
   AutoModerationRuleKeywordPresetType, AutoModerationActionType, AutoModerationRuleTriggerType
 } = require('discord.js');
 const db = require('../../utils/db');
+const { successEmbed, warningEmbed, infoEmbed, errorEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -121,11 +122,9 @@ module.exports = {
       }
 
       await interaction.editReply({
-        embeds: [new EmbedBuilder()
-          .setColor(0x00FF88).setTitle('🤖 AutoMod Nativo Configurado')
-          .setDescription(results.join('\n'))
-          .addFields({ name: '📋 Canal de alertas', value: `<#${logCh.id}>` })
-          .setFooter({ text: 'System 777 · Dev: 777' })]
+        embeds: [successEmbed('🤖 AutoMod Nativo Configurado', results.join('\n'), {
+          fields: [{ name: '📋 Canal de alertas', value: `<#${logCh.id}>` }]
+        })]
       });
 
     // ── FLOOD ──────────────────────────────────────────────────
@@ -136,10 +135,9 @@ module.exports = {
       cfg.floodLimit = limite;
       db.set('guilds', interaction.guild.id, cfg);
       await interaction.reply({
-        embeds: [new EmbedBuilder().setColor(activo ? 0x00FF88 : 0xFF4444)
-          .setTitle(`🚨 Anti-Flood ${activo ? 'Activado' : 'Desactivado'}`)
-          .setDescription(activo ? `Timeout automático si alguien envía **${limite}+ msgs en 5s**.` : 'Protección desactivada.')
-          .setFooter({ text: 'System 777 · Dev: 777' })],
+        embeds: [activo
+          ? successEmbed(`🚨 Anti-Flood Activado`, `Timeout automático si alguien envía **${limite}+ msgs en 5s**.`)
+          : errorEmbed(`🚨 Anti-Flood Desactivado`, 'Protección desactivada.')],
         flags: MessageFlags.Ephemeral
       });
 
@@ -149,10 +147,9 @@ module.exports = {
       cfg.automodCustom.antilink = activo;
       db.set('guilds', interaction.guild.id, cfg);
       await interaction.reply({
-        embeds: [new EmbedBuilder().setColor(activo ? 0x00FF88 : 0xFF4444)
-          .setTitle(`🔗 Anti-Link ${activo ? 'Activado' : 'Desactivado'}`)
-          .setDescription(activo ? 'Links y discord.gg serán eliminados automáticamente.' : 'Links permitidos.')
-          .setFooter({ text: 'System 777 · Dev: 777' })],
+        embeds: [activo
+          ? successEmbed('🔗 Anti-Link Activado', 'Links y discord.gg serán eliminados automáticamente.')
+          : errorEmbed('🔗 Anti-Link Desactivado', 'Links permitidos.')],
         flags: MessageFlags.Ephemeral
       });
 
@@ -162,10 +159,9 @@ module.exports = {
       cfg.automodCustom.anticaps = activo;
       db.set('guilds', interaction.guild.id, cfg);
       await interaction.reply({
-        embeds: [new EmbedBuilder().setColor(activo ? 0x00FF88 : 0xFF4444)
-          .setTitle(`🔡 Anti-Caps ${activo ? 'Activado' : 'Desactivado'}`)
-          .setDescription(activo ? 'Mensajes con >70% mayúsculas serán eliminados.' : 'Caps permitidas.')
-          .setFooter({ text: 'System 777 · Dev: 777' })],
+        embeds: [activo
+          ? successEmbed('🔡 Anti-Caps Activado', 'Mensajes con >70% mayúsculas serán eliminados.')
+          : errorEmbed('🔡 Anti-Caps Desactivado', 'Caps permitidas.')],
         flags: MessageFlags.Ephemeral
       });
 
@@ -177,10 +173,9 @@ module.exports = {
       cfg.automodCustom.emojiLimit = limite;
       db.set('guilds', interaction.guild.id, cfg);
       await interaction.reply({
-        embeds: [new EmbedBuilder().setColor(activo ? 0x00FF88 : 0xFF4444)
-          .setTitle(`😵 Anti-Emoji ${activo ? 'Activado' : 'Desactivado'}`)
-          .setDescription(activo ? `Mensajes con más de **${limite} emojis** serán eliminados.` : 'Sin límite de emojis.')
-          .setFooter({ text: 'System 777 · Dev: 777' })],
+        embeds: [activo
+          ? successEmbed('😵 Anti-Emoji Activado', `Mensajes con más de **${limite} emojis** serán eliminados.`)
+          : errorEmbed('😵 Anti-Emoji Desactivado', 'Sin límite de emojis.')],
         flags: MessageFlags.Ephemeral
       });
 
@@ -204,10 +199,7 @@ module.exports = {
       }
       if (accion === 'list') {
         return interaction.reply({
-          embeds: [new EmbedBuilder().setColor(0x5865F2)
-            .setTitle('🚫 Palabras Bloqueadas')
-            .setDescription(wf.length ? wf.map(w => `\`${w}\``).join(', ') : 'Sin palabras filtradas.')
-            .setFooter({ text: 'System 777 · Dev: 777' })],
+          embeds: [infoEmbed('🚫 Palabras Bloqueadas', wf.length ? wf.map(w => `\`${w}\``).join(', ') : 'Sin palabras filtradas.')],
           flags: MessageFlags.Ephemeral
         });
       }
@@ -218,9 +210,8 @@ module.exports = {
       const sc = cfg.security ?? {};
       const wl = cfg.automodWhitelist ?? {};
       await interaction.reply({
-        embeds: [new EmbedBuilder().setColor(0x5865F2)
-          .setTitle('📊 Estado AutoMod — System 777')
-          .addFields(
+        embeds: [infoEmbed('📊 Estado AutoMod — System 777', null, {
+          fields: [
             { name: '🚨 Anti-Flood',     value: cfg.antiflood      ? `✅ (${cfg.floodLimit ?? 5}/5s)`     : '❌', inline: true },
             { name: '🔗 Anti-Link',      value: am.antilink        ? '✅'                                  : '❌', inline: true },
             { name: '🔡 Anti-Caps',      value: am.anticaps        ? '✅'                                  : '❌', inline: true },
@@ -238,8 +229,8 @@ module.exports = {
             { name: '⚡ Auto-Punish',    value: sc.autoPunish      ? '✅'                                  : '❌', inline: true },
             { name: '🚫 Word Filter',    value: am.wordFilter?.length ? `✅ ${am.wordFilter.length} palabras` : '❌', inline: true },
             { name: '⚪ Whitelist',       value: `Roles: ${wl.roles?.length || 0} · Canales: ${wl.channels?.length || 0} · Usuarios: ${wl.users?.length || 0}`, inline: false },
-          )
-          .setFooter({ text: 'System 777 · Dev: 777' })],
+          ]
+        })],
         flags: MessageFlags.Ephemeral
       });
 
@@ -274,11 +265,10 @@ module.exports = {
       db.set('guilds', interaction.guild.id, newCfg);
 
       const icons = { low: '🟢', medium: '🟡', high: '🔴', paranoid: '🆘' };
+      const presetColors = { low: 'success', medium: 'warning', high: 'warning', paranoid: 'error' };
       await interaction.reply({
-        embeds: [new EmbedBuilder().setColor(nivel === 'paranoid' ? 0xFF0000 : nivel === 'high' ? 0xFF9900 : nivel === 'medium' ? 0xFFFF00 : 0x00FF88)
-          .setTitle(`${icons[nivel]} Preset AutoMod — ${nivel.toUpperCase()}`)
-          .setDescription('Configuración de seguridad aplicada.')
-          .addFields(
+        embeds: [warningEmbed(`${icons[nivel]} Preset AutoMod — ${nivel.toUpperCase()}`, 'Configuración de seguridad aplicada.', {
+          fields: [
             { name: '🚨 Anti-Flood',    value: `Límite: ${preset.floodLimit} msgs/5s`, inline: true },
             { name: '🔗 Anti-Link',     value: preset.automodCustom.antilink ? '✅' : '❌', inline: true },
             { name: '🎣 Anti-Phishing', value: preset.security.antiPhishing ? '✅' : '❌', inline: true },
@@ -286,8 +276,8 @@ module.exports = {
             { name: '🔤 Anti-Zalgo',    value: preset.security.antiZalgo ? '✅' : '❌', inline: true },
             { name: '👶 Anti-Alt',      value: preset.security.antiAlt ? `✅ (${preset.security.minAccountAge}d, ${preset.security.altAction})` : '❌', inline: true },
             { name: '⚡ Auto-Punish',   value: preset.security.autoPunish ? '✅' : '❌', inline: true },
-          )
-          .setFooter({ text: 'System 777 · AutoMod Preset · Dev: 777' })],
+          ]
+        })],
         flags: MessageFlags.Ephemeral
       });
 
@@ -301,13 +291,13 @@ module.exports = {
 
       if (accion === 'list') {
         return interaction.reply({
-          embeds: [new EmbedBuilder().setColor(0x5865F2)
-            .setTitle('⚪ Whitelist AutoMod')
-            .addFields(
+          embeds: [infoEmbed('⚪ Whitelist AutoMod', null, {
+            fields: [
               { name: '🎭 Roles',    value: wl.roles?.map(r => `<@&${r}>`).join(', ')    || 'Ninguno', inline: false },
               { name: '📢 Canales', value: wl.channels?.map(c => `<#${c}>`).join(', ')   || 'Ninguno', inline: false },
               { name: '👤 Usuarios', value: wl.users?.map(u => `<@${u}>`).join(', ')     || 'Ninguno', inline: false },
-            )],
+            ]
+          })],
           flags: MessageFlags.Ephemeral
         });
       }

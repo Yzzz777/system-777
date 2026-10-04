@@ -1,4 +1,4 @@
-﻿const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 const OPTS = ['🪨 Piedra', '📄 Papel', '✂️ Tijeras'];
 
@@ -13,24 +13,31 @@ module.exports = {
     )),
 
   async execute(interaction) {
-    const player = parseInt(interaction.options.getString('eleccion'));
-    const bot    = Math.floor(Math.random() * 3);
+    try {
+      const player = parseInt(interaction.options.getString('eleccion'));
+      const bot    = Math.floor(Math.random() * 3);
 
-    let result, color;
-    if (player === bot)               { result = '🤝 Empate'; color = 0xFFCC00; }
-    else if ((player - bot + 3) % 3 === 1) { result = '🏆 ¡Ganaste!'; color = 0x00FF88; }
-    else                              { result = '💀 Perdiste'; color = 0xFF4444; }
+      let result, color;
+      if (player === bot)               { result = '🤝 Empate'; color = 0xFFCC00; }
+      else if ((player - bot + 3) % 3 === 1) { result = '🏆 ¡Ganaste!'; color = 0x00FF88; }
+      else                              { result = '💀 Perdiste'; color = 0xFF4444; }
 
-    await interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(color)
-        .setTitle('✊ Piedra, Papel o Tijeras')
-        .addFields(
-          { name: 'Tú',    value: OPTS[player], inline: true },
-          { name: 'Bot',   value: OPTS[bot],    inline: true },
-          { name: 'Resultado', value: `## ${result}` }
-        )
-        .setFooter({ text: 'System 777 · Developer 777' })]
-    });
+      await interaction.reply({
+        embeds: [new EmbedBuilder()
+          .setColor(color)
+          .setTitle('✊ Piedra, Papel o Tijeras')
+          .addFields(
+            { name: 'Tú',    value: OPTS[player], inline: true },
+            { name: 'Bot',   value: OPTS[bot],    inline: true },
+            { name: 'Resultado', value: `## ${result}` }
+          )
+          .setFooter({ text: 'System 777 • Developer 777' })]
+      });
+    } catch (error) {
+      console.error('[ERROR] rps:', error);
+      const reply = { content: '❌ Error interno del comando.', ephemeral: true };
+      if (interaction.deferred) await interaction.editReply(reply).catch(() => {});
+      else await interaction.reply(reply).catch(() => {});
+    }
   }
 };

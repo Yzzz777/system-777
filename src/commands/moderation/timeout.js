@@ -1,5 +1,7 @@
-﻿const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const ms = require('ms');
+const db = require('../../utils/db');
+const { modEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -23,18 +25,17 @@ module.exports = {
       return interaction.reply({ content: '❌ Duración inválida. Usa: `10s`, `5m`, `2h`, `1d` (máx 28 días).', flags: MessageFlags.Ephemeral });
 
     await target.timeout(msTime, `${reason} | Mod: ${interaction.user.tag}`);
+    db.logActivity(interaction.guild.id, { actionType: 'timeout', userId: interaction.user.id, targetId: target.id, details: `Timeout: ${target.user.tag} por ${duration} | Razón: ${reason}` });
 
     await interaction.reply({
-      embeds: [new EmbedBuilder()
-        .setColor(0xFF9900)
-        .setTitle('⏱️ Timeout Aplicado')
-        .addFields(
+      embeds: [modEmbed('⏱️ Timeout Aplicado', null, {
+        fields: [
           { name: 'Usuario',  value: `${target.user.tag}`,                              inline: true },
           { name: 'Duración', value: duration,                                           inline: true },
           { name: 'Termina',  value: `<t:${Math.floor((Date.now()+msTime)/1000)}:R>`,   inline: true },
           { name: 'Razón',    value: reason }
-        )
-        .setFooter({ text: 'System 777 · Developer 777' })]
+        ]
+      })]
     });
   }
 };

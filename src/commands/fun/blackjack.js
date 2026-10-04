@@ -36,6 +36,7 @@ module.exports = {
     .addIntegerOption(o => o.setName('apuesta').setDescription('Monedas a apostar').setRequired(true).setMinValue(10).setMaxValue(50000)),
 
   async execute(interaction) {
+    try {
     const apuesta = interaction.options.getInteger('apuesta');
     const bal     = getBalance(interaction.user.id);
 
@@ -76,6 +77,10 @@ module.exports = {
     }
 
     await interaction.reply({ embeds: [embed()], components: [row] });
+    } catch (err) {
+      if (interaction.replied || interaction.deferred) return;
+      await interaction.reply({content:`❌ Error: ${err.message}`,flags:MessageFlags.Ephemeral}).catch(()=>{});
+    }
   }
 };
 

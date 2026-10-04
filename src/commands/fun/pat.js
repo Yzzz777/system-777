@@ -5,12 +5,19 @@ module.exports = {
     .setName('pat').setDescription('🥺 Acaricia a alguien')
     .addUserOption(o => o.setName('usuario').setDescription('Usuario').setRequired(true)),
   async execute(interaction) {
-    const target = interaction.options.getUser('usuario');
-    await interaction.reply({
-      embeds: [new EmbedBuilder().setColor(0xFFCC00)
-        .setDescription(`🥺 ${interaction.user} le dio palmaditas a ${target}`)
-        .setImage('https://media.tenor.com/3i3snCIc3o8AAAAC/anime-headpat.gif')
-        .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })]
-    });
+    try {
+      const target = interaction.options.getUser('usuario');
+      await interaction.reply({
+        embeds: [new EmbedBuilder().setColor(0xFFCC00)
+          .setDescription(`🥺 ${interaction.user} le dio palmaditas a ${target}`)
+          .setImage('https://media.tenor.com/3i3snCIc3o8AAAAC/anime-headpat.gif')
+          .setFooter({ text: 'System 777 • jrsystem7777.com' })]
+      });
+    } catch (error) {
+      console.error('[ERROR] pat:', error);
+      const reply = { content: '❌ Error interno del comando.', ephemeral: true };
+      if (interaction.deferred) await interaction.editReply(reply).catch(() => {});
+      else await interaction.reply(reply).catch(() => {});
+    }
   }
 };

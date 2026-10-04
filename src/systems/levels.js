@@ -40,13 +40,22 @@ function getStats(userId, guildId) {
   return { ...data, xpForNext: next, progress };
 }
 
+let leaderboardCache = new Map();
+let leaderboardCacheTime = 0;
+
 function getLeaderboard(guildId, limit = 10) {
+  const now = Date.now();
+  if (leaderboardCache.has(guildId) && now - leaderboardCacheTime < 60000) {
+    return leaderboardCache.get(guildId).slice(0, limit);
+  }
   const all = db.all('levels');
-  return Object.entries(all)
+  const result = Object.entries(all)
     .filter(([k]) => k.endsWith(`_${guildId}`))
     .map(([k, v]) => ({ userId: k.split('_')[0], ...v }))
-    .sort((a, b) => b.xp - a.xp)
-    .slice(0, limit);
+    .sort((a, b) => b.xp - a.xp);
+  leaderboardCache.set(guildId, result);
+  leaderboardCacheTime = now;
+  return result.slice(0, limit);
 }
 
 module.exports = { addXp, getStats, getLeaderboard, xpForLevel };

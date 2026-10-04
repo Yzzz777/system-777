@@ -26,48 +26,55 @@ module.exports = {
   userPermissions: [PermissionFlagsBits.ManageRoles],
 
   async execute(interaction) {
-    const sub = interaction.options.getSubcommand();
-    const cfg = db.get('guilds', interaction.guild.id, {});
+    try {
+      const sub = interaction.options.getSubcommand();
+      const cfg = db.get('guilds', interaction.guild.id, {});
 
-    if (sub === 'set') {
-      const rol = interaction.options.getRole('rol');
-      if (rol.managed) return interaction.reply({ content: '❌ No puedes usar roles de integración.', flags: MessageFlags.Ephemeral });
-      if (rol.position >= interaction.guild.members.me.roles.highest.position) {
-        return interaction.reply({ content: '❌ El rol está por encima del bot.', flags: MessageFlags.Ephemeral });
+      if (sub === 'set') {
+        const rol = interaction.options.getRole('rol');
+        if (rol.managed) return interaction.reply({ content: '❌ No puedes usar roles de integración.', flags: MessageFlags.Ephemeral });
+        if (rol.position >= interaction.guild.members.me.roles.highest.position) {
+          return interaction.reply({ content: '❌ El rol está por encima del bot.', flags: MessageFlags.Ephemeral });
+        }
+        cfg.autorole = rol.id;
+        db.set('guilds', interaction.guild.id, cfg);
+        return interaction.reply({ content: `✅ Auto-rol para miembros: **${rol.name}**`, flags: MessageFlags.Ephemeral });
       }
-      cfg.autorole = rol.id;
-      db.set('guilds', interaction.guild.id, cfg);
-      return interaction.reply({ content: `✅ Auto-rol para miembros: **${rol.name}**`, flags: MessageFlags.Ephemeral });
-    }
 
-    if (sub === 'bot') {
-      const rol = interaction.options.getRole('rol');
-      cfg.autoroleBot = rol.id;
-      db.set('guilds', interaction.guild.id, cfg);
-      return interaction.reply({ content: `✅ Auto-rol para bots: **${rol.name}**`, flags: MessageFlags.Ephemeral });
-    }
+      if (sub === 'bot') {
+        const rol = interaction.options.getRole('rol');
+        cfg.autoroleBot = rol.id;
+        db.set('guilds', interaction.guild.id, cfg);
+        return interaction.reply({ content: `✅ Auto-rol para bots: **${rol.name}**`, flags: MessageFlags.Ephemeral });
+      }
 
-    if (sub === 'remove') {
-      const tipo = interaction.options.getString('tipo');
-      if (tipo === 'members' || tipo === 'both') delete cfg.autorole;
-      if (tipo === 'bots'    || tipo === 'both') delete cfg.autoroleBot;
-      db.set('guilds', interaction.guild.id, cfg);
-      return interaction.reply({ content: '✅ Auto-rol desactivado.', flags: MessageFlags.Ephemeral });
-    }
+      if (sub === 'remove') {
+        const tipo = interaction.options.getString('tipo');
+        if (tipo === 'members' || tipo === 'both') delete cfg.autorole;
+        if (tipo === 'bots'    || tipo === 'both') delete cfg.autoroleBot;
+        db.set('guilds', interaction.guild.id, cfg);
+        return interaction.reply({ content: '✅ Auto-rol desactivado.', flags: MessageFlags.Ephemeral });
+      }
 
-    if (sub === 'status') {
-      const mr = cfg.autorole    ? `<@&${cfg.autorole}>`    : '❌ Sin configurar';
-      const br = cfg.autoroleBot ? `<@&${cfg.autoroleBot}>` : '❌ Sin configurar';
-      return interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setTitle('🎭 Estado del Auto-Rol')
-          .addFields(
-            { name: '👤 Miembros', value: mr, inline: true },
-            { name: '🤖 Bots',     value: br, inline: true },
-          ).setFooter({ text: 'System 777 · Dev: 777' })],
-        flags: MessageFlags.Ephemeral,
-      });
+      if (sub === 'status') {
+        const mr = cfg.autorole    ? `<@&${cfg.autorole}>`    : '❌ Sin configurar';
+        const br = cfg.autoroleBot ? `<@&${cfg.autoroleBot}>` : '❌ Sin configurar';
+        return interaction.reply({
+          embeds: [new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setTitle('🎭 Estado del Auto-Rol')
+            .addFields(
+              { name: '👤 Miembros', value: mr, inline: true },
+              { name: '🤖 Bots',     value: br, inline: true },
+            ).setFooter({ text: 'System 777 • jrsystem7777.com' })],
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+    } catch (error) {
+      console.error('[ERROR] autorole:', error);
+      const reply = { content: '❌ Error interno del comando.', ephemeral: true };
+      if (interaction.deferred) await interaction.editReply(reply).catch(() => {});
+      else await interaction.reply(reply).catch(() => {});
     }
   }
 };

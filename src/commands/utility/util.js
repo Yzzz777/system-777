@@ -1,5 +1,6 @@
-const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const db = require('../../utils/db');
+const { infoEmbed, successEmbed, errorEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -30,48 +31,51 @@ module.exports = {
 
     if (sub === 'avatar') {
       const user = interaction.options.getUser('usuario') || interaction.user;
-      const embed = new EmbedBuilder().setColor(0x5865F2).setTitle(`🖼️ Avatar de ${user.tag}`)
-        .setImage(user.displayAvatarURL({ size: 512, dynamic: true }))
-        .setFooter({text:'System 777 · Dev: 777'});
+      const embed = infoEmbed(`🖼️ Avatar de ${user.tag}`, null, {
+        image: user.displayAvatarURL({ size: 512, dynamic: true })
+      });
       await interaction.reply({embeds:[embed]});
 
     } else if (sub === 'userinfo') {
       const user = interaction.options.getUser('usuario') || interaction.user;
       const member = interaction.guild?.members?.cache.get(user.id);
-      const embed = new EmbedBuilder().setColor(0x5865F2).setTitle(`👤 ${user.tag}`)
-        .setThumbnail(user.displayAvatarURL({dynamic:true}))
-        .addFields(
+      const embed = infoEmbed(`👤 ${user.tag}`, null, {
+        thumbnail: user.displayAvatarURL({dynamic:true}),
+        fields: [
           {name:'ID',value:user.id,inline:true},
           {name:'Creado',value:`<t:${Math.floor(user.createdTimestamp/1000)}:R>`,inline:true},
           {name:'Se unió',value:member?`<t:${Math.floor(member.joinedTimestamp/1000)}:R>`:'N/A',inline:true},
           {name:'Roles',value:member?member.roles.cache.map(r=>r.toString()).slice(0,15).join(', ')||'Ninguno':'N/A',inline:false}
-        ).setFooter({text:'System 777 · Dev: 777'});
+        ]
+      });
       await interaction.reply({embeds:[embed]});
 
     } else if (sub === 'serverinfo') {
       const g = interaction.guild;
-      const embed = new EmbedBuilder().setColor(0x5865F2).setTitle(`🏠 ${g.name}`)
-        .setThumbnail(g.iconURL({dynamic:true}))
-        .addFields(
+      const embed = infoEmbed(`🏠 ${g.name}`, null, {
+        thumbnail: g.iconURL({dynamic:true}),
+        fields: [
           {name:'Miembros',value:`${g.memberCount}`,inline:true},
           {name:'Canales',value:`${g.channels.cache.size}`,inline:true},
           {name:'Roles',value:`${g.roles.cache.size}`,inline:true},
           {name:'Emojis',value:`${g.emojis.cache.size}`,inline:true},
           {name:'Creado',value:`<t:${Math.floor(g.createdTimestamp/1000)}:R>`,inline:true},
           {name:'Owner',value:`<@${g.ownerId}>`,inline:true}
-        ).setFooter({text:'System 777 · Dev: 777'});
+        ]
+      });
       await interaction.reply({embeds:[embed]});
 
     } else if (sub === 'botinfo') {
-      const embed = new EmbedBuilder().setColor(0x5865F2).setTitle('🤖 System 777 Bot')
-        .addFields(
+      const embed = infoEmbed('🤖 System 777 Bot', null, {
+        fields: [
           {name:'Servidores',value:`${client.guilds.cache.size}`,inline:true},
           {name:'Usuarios',value:`${client.guilds.cache.reduce((a,g)=>a+g.memberCount,0)}`,inline:true},
           {name:'Comandos',value:`${client.commands?.size||0}`,inline:true},
           {name:'Uptime',value:`${Math.floor(client.uptime/1000/60)}m`,inline:true},
           {name:'Ping',value:`${client.ws.ping}ms`,inline:true},
           {name:'Node',value:process.version,inline:true}
-        ).setFooter({text:'System 777 · Dev: 777'});
+        ]
+      });
       await interaction.reply({embeds:[embed]});
 
     } else if (sub === 'ping') {
@@ -88,13 +92,20 @@ module.exports = {
       try { resultado = Function(`"use strict"; return (${expr.replace(/\^/g,'**')})`)(); }
       catch { return interaction.reply({content:'❌ Error en la expresión.',flags:MessageFlags.Ephemeral}); }
       if (!isFinite(resultado)) return interaction.reply({content:'❌ Resultado no válido.',flags:MessageFlags.Ephemeral});
-      await interaction.reply({embeds:[new EmbedBuilder().setColor(0x00FF88).setTitle('🧮 Calculadora').addFields({name:'Expresión',value:`\`${expr}\``,inline:true},{name:'Resultado',value:`\`${resultado.toLocaleString()}\``,inline:true}).setFooter({text:'System 777 · Dev: 777'})]});
+      await interaction.reply({embeds:[successEmbed('🧮 Calculadora', null, {
+        fields: [
+          {name:'Expresión',value:`\`${expr}\``,inline:true},
+          {name:'Resultado',value:`\`${resultado.toLocaleString()}\``,inline:true}
+        ]
+      })]});
 
     } else if (sub === 'password') {
       const len = interaction.options.getInteger('longitud') ?? 16;
       const crypto = require('crypto');
       const pass = crypto.randomBytes(len).toString('base64url').slice(0,len);
-      await interaction.reply({embeds:[new EmbedBuilder().setColor(0x00FF88).setTitle('🔑 Contraseña').setDescription(`\`${pass}\``).addFields({name:'Longitud',value:`${len} chars`,inline:true}).setFooter({text:'System 777 · Dev: 777'})],flags:MessageFlags.Ephemeral});
+      await interaction.reply({embeds:[successEmbed('🔑 Contraseña', `\`${pass}\``, {
+        fields: [{name:'Longitud',value:`${len} chars`,inline:true}]
+      })],flags:MessageFlags.Ephemeral});
 
     } else if (sub === 'remind') {
       const time = interaction.options.getString('tiempo');
@@ -117,24 +128,27 @@ module.exports = {
       const eco = db.get('economy', user.id, {coins:0,bank:0});
       const lvl = db.get('levels', user.id, {xp:0,level:1});
       const warns = db.get('warns', user.id, []);
-      await interaction.reply({embeds:[new EmbedBuilder().setColor(0x5865F2).setTitle(`📊 Stats de ${user.tag}`).setThumbnail(user.displayAvatarURL({dynamic:true})).addFields(
-        {name:'💰 Economía',value:`Efectivo: $${eco.coins}\nBanco: $${eco.bank}`,inline:true},
-        {name:'⭐ Niveles',value:`Nivel: ${lvl.level}\nXP: ${lvl.xp}`,inline:true},
-        {name:'⚠️ Warns',value:`${Array.isArray(warns)?warns.length:0}`,inline:true}
-      ).setFooter({text:'System 777 · Dev: 777'})]});
+      await interaction.reply({embeds:[infoEmbed(`📊 Stats de ${user.tag}`, null, {
+        thumbnail: user.displayAvatarURL({dynamic:true}),
+        fields: [
+          {name:'💰 Economía',value:`Efectivo: $${eco.coins}\nBanco: $${eco.bank}`,inline:true},
+          {name:'⭐ Niveles',value:`Nivel: ${lvl.level}\nXP: ${lvl.xp}`,inline:true},
+          {name:'⚠️ Warns',value:`${Array.isArray(warns)?warns.length:0}`,inline:true}
+        ]
+      })]});
 
     } else if (sub === 'rolelist') {
       const roles = interaction.guild.roles.cache.sort((a,b)=>b.position-a.position).map(r=>`${r} (${r.members.size})`).slice(0,30);
-      await interaction.reply({embeds:[new EmbedBuilder().setColor(0x5865F2).setTitle('📋 Roles').setDescription(roles.join('\n')).setFooter({text:'System 777 · Dev: 777'})]});
+      await interaction.reply({embeds:[infoEmbed('📋 Roles', roles.join('\n'))]});
 
     } else if (sub === 'invite') {
       const BOT_CLIENT_ID = process.env.CLIENT_ID || '1502804306125132057';
-      await interaction.reply({embeds:[new EmbedBuilder().setColor(0x5865F2).setTitle('🔗 Invitar Bot').setDescription(`[Click aquí para invitar](https://discord.com/oauth2/authorize?client_id=${BOT_CLIENT_ID}&permissions=8&scope=applications.commands+bot)`).setFooter({text:'System 777 · Dev: 777'})]});
+      await interaction.reply({embeds:[infoEmbed('🔗 Invitar Bot', `[Click aquí para invitar](https://discord.com/oauth2/authorize?client_id=${BOT_CLIENT_ID}&permissions=8&scope=applications.commands+bot)`)]});
 
     } else if (sub === 'snipe') {
       const sniped = db.get('snipe', interaction.channel?.id, null);
       if (!sniped) return interaction.reply({content:'❌ No hay mensajes eliminados recientes.',flags:MessageFlags.Ephemeral});
-      await interaction.reply({embeds:[new EmbedBuilder().setColor(0x5865F2).setTitle('👻 Snipe').setDescription(`**${sniped.author}**: ${sniped.content}`).setFooter({text:'System 777 · Dev: 777'})]});
+      await interaction.reply({embeds:[infoEmbed('👻 Snipe', `**${sniped.author}**: ${sniped.content}`)]});
 
     } else if (sub === 'weather') {
       const city = interaction.options.getString('ciudad');
@@ -147,7 +161,9 @@ module.exports = {
 
     } else if (sub === 'suggest') {
       const sug = interaction.options.getString('sugerencia');
-      const embed = new EmbedBuilder().setColor(0x5865F2).setTitle('💡 Sugerencia').setDescription(sug).addFields({name:'De',value:interaction.user.tag,inline:true}).setFooter({text:'System 777 · Dev: 777'});
+      const embed = infoEmbed('💡 Sugerencia', sug, {
+        fields: [{name:'De',value:interaction.user.tag,inline:true}]
+      });
       await interaction.reply({embeds:[embed]});
 
     } else if (sub === 'starboard') {

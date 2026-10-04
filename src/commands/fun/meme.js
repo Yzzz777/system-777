@@ -28,11 +28,11 @@ module.exports = {
         .setTitle(post.title.slice(0, 256))
         .setImage(post.url)
         .addFields(
-          { name: '⬆️ Upvotes', value: `${post.ups.toLocaleString()}`, inline: true },
-          { name: '💬 Comentarios', value: `${post.num_comments.toLocaleString()}`, inline: true },
+          { name: '⬆️ Upvotes', value: `${(post.ups || 0).toLocaleString()}`, inline: true },
+          { name: '💬 Comentarios', value: `${(post.num_comments || 0).toLocaleString()}`, inline: true },
           { name: '📌 Subreddit', value: `r/${sub}`, inline: true },
         )
-        .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' });
+        .setFooter({ text: 'System 777 • jrsystem7777.com' });
 
       await interaction.editReply({ embeds: [embed] });
     } catch {

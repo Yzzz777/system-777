@@ -32,93 +32,100 @@ module.exports = {
     .setDescription('🧩 Adivinanzas interactivas con botones'),
 
   async execute(interaction) {
-    const adivinanza = ADIVINANZAS[Math.floor(Math.random() * ADIVINANZAS.length)];
+    try {
+      const adivinanza = ADIVINANZAS[Math.floor(Math.random() * ADIVINANZAS.length)];
 
-    const opciones = [adivinanza.a];
-    const respuestasIncorrectas = ADIVINANZAS
-      .filter(a => a.a !== adivinanza.a)
-      .sort(() => Math.random() - 0.5)
-      .slice(0, 3)
-      .map(a => a.a);
-    opciones.push(...respuestasIncorrectas);
+      const opciones = [adivinanza.a];
+      const respuestasIncorrectas = ADIVINANZAS
+        .filter(a => a.a !== adivinanza.a)
+        .sort(() => Math.random() - 0.5)
+        .slice(0, 3)
+        .map(a => a.a);
+      opciones.push(...respuestasIncorrectas);
 
-    for (let i = opciones.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [opciones[i], opciones[j]] = [opciones[j], opciones[i]];
-    }
-
-    const correctIdx = opciones.indexOf(adivinanza.a);
-
-    const row = new ActionRowBuilder().addComponents(
-      opciones.map((opt, i) =>
-        new ButtonBuilder()
-          .setCustomId(`riddle_${i}_${correctIdx}`)
-          .setLabel(`${EMOJIS[i]} ${opt}`)
-          .setStyle(COLORES[i])
-      )
-    );
-
-    const embed = new EmbedBuilder()
-      .setColor(0x5865F2)
-      .setTitle('🧩 Adivinanza — System 777')
-      .setDescription(`**${adivinanza.q}**`)
-      .setFooter({ text: '30 segundos · System 777 · Dev: 777 · IG: @yzz.yzx' });
-
-    const msg = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
-    const ganadores = new Set();
-    const respondidos = new Set();
-
-    const collector = msg.createMessageComponentCollector({ time: 30000 });
-
-    collector.on('collect', async btn => {
-      if (respondidos.has(btn.user.id)) {
-        return btn.reply({ content: '❌ Ya respondiste.', flags: MessageFlags.Ephemeral });
+      for (let i = opciones.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [opciones[i], opciones[j]] = [opciones[j], opciones[i]];
       }
-      respondidos.add(btn.user.id);
 
-      const [, elegidoStr, correctoStr] = btn.customId.split('_');
-      const elegido = parseInt(elegidoStr);
-      const correcto = parseInt(correctoStr);
-      const acierto = elegido === correcto;
+      const correctIdx = opciones.indexOf(adivinanza.a);
 
-      if (acierto) ganadores.add(btn.user.username);
-
-      await btn.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(acierto ? 0x00FF88 : 0xFF4444)
-          .setDescription(
-            acierto
-              ? `✅ **¡Correcto, ${btn.user.username}!** La respuesta era **${adivinanza.a}**.`
-              : `❌ **Incorrecto, ${btn.user.username}.** La respuesta era **${adivinanza.a}**.`
-          )],
-        flags: MessageFlags.Ephemeral
-      });
-    });
-
-    collector.on('end', () => {
-      const finalEmbed = new EmbedBuilder()
-        .setColor(0x00FF88)
-        .setTitle('🧩 Resultado — Adivinanza')
-        .setDescription(
-          `**${adivinanza.q}**\n\n` +
-          `**Respuesta:** ${adivinanza.a}\n\n` +
-          (ganadores.size > 0
-            ? `🏆 **Ganadores:** ${[...ganadores].join(', ')}`
-            : '🏆 Nadie acertó esta vez.')
-        )
-        .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' });
-
-      const disRow = new ActionRowBuilder().addComponents(
+      const row = new ActionRowBuilder().addComponents(
         opciones.map((opt, i) =>
           new ButtonBuilder()
-            .setCustomId(`riddle_done_${i}`)
-            .setLabel(`${EMOJIS[i]} ${opt}${i === correctIdx ? ' ✅' : ''}`)
-            .setStyle(i === correctIdx ? ButtonStyle.Success : ButtonStyle.Secondary)
-            .setDisabled(true)
+            .setCustomId(`riddle_${i}_${correctIdx}`)
+            .setLabel(`${EMOJIS[i]} ${opt}`)
+            .setStyle(COLORES[i])
         )
       );
 
-      msg.edit({ embeds: [finalEmbed], components: [disRow] }).catch(() => {});
-    });
+      const embed = new EmbedBuilder()
+        .setColor(0x5865F2)
+        .setTitle('🧩 Adivinanza — System 777')
+        .setDescription(`**${adivinanza.q}**`)
+        .setFooter({ text: '30 segundos · System 777 • jrsystem7777.com' });
+
+      const msg = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
+      const ganadores = new Set();
+      const respondidos = new Set();
+
+      const collector = msg.createMessageComponentCollector({ time: 30000 });
+
+      collector.on('collect', async btn => {
+        if (respondidos.has(btn.user.id)) {
+          return btn.reply({ content: '❌ Ya respondiste.', flags: MessageFlags.Ephemeral });
+        }
+        respondidos.add(btn.user.id);
+
+        const [, elegidoStr, correctoStr] = btn.customId.split('_');
+        const elegido = parseInt(elegidoStr);
+        const correcto = parseInt(correctoStr);
+        const acierto = elegido === correcto;
+
+        if (acierto) ganadores.add(btn.user.username);
+
+        await btn.reply({
+          embeds: [new EmbedBuilder()
+            .setColor(acierto ? 0x00FF88 : 0xFF4444)
+            .setDescription(
+              acierto
+                ? `✅ **¡Correcto, ${btn.user.username}!** La respuesta era **${adivinanza.a}**.`
+                : `❌ **Incorrecto, ${btn.user.username}.** La respuesta era **${adivinanza.a}**.`
+            )],
+          flags: MessageFlags.Ephemeral
+        });
+      });
+
+      collector.on('end', () => {
+        const finalEmbed = new EmbedBuilder()
+          .setColor(0x00FF88)
+          .setTitle('🧩 Resultado — Adivinanza')
+          .setDescription(
+            `**${adivinanza.q}**\n\n` +
+            `**Respuesta:** ${adivinanza.a}\n\n` +
+            (ganadores.size > 0
+              ? `🏆 **Ganadores:** ${[...ganadores].join(', ')}`
+              : '🏆 Nadie acertó esta vez.')
+          )
+          .setFooter({ text: 'System 777 • jrsystem7777.com' });
+
+        const disRow = new ActionRowBuilder().addComponents(
+          opciones.map((opt, i) =>
+            new ButtonBuilder()
+              .setCustomId(`riddle_done_${i}`)
+              .setLabel(`${EMOJIS[i]} ${opt}${i === correctIdx ? ' ✅' : ''}`)
+              .setStyle(i === correctIdx ? ButtonStyle.Success : ButtonStyle.Secondary)
+              .setDisabled(true)
+          )
+        );
+
+        msg.edit({ embeds: [finalEmbed], components: [disRow] }).catch(() => {});
+      });
+    } catch (error) {
+      console.error('[ERROR] riddles:', error);
+      const reply = { content: '❌ Error interno del comando.', ephemeral: true };
+      if (interaction.deferred) await interaction.editReply(reply).catch(() => {});
+      else await interaction.reply(reply).catch(() => {});
+    }
   }
 };

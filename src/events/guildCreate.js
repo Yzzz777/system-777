@@ -118,7 +118,7 @@ module.exports = {
               { name: 'Total servidores', value: `${client.guilds.cache.size}`, inline: true }
             )
             .setThumbnail(guild.iconURL())
-            .setFooter({ text: 'System 777 · Developer 777' })
+            .setFooter({ text: 'System 777 • Developer 777' })
             .setTimestamp();
           await ownerUser.send({ embeds: [embedNotif] });
         }

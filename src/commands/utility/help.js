@@ -1,4 +1,5 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { infoEmbed, FOOTER_BASE } = require('../../utils/embeds');
 
 const categories = [
   { name: '🛡️ Moderación', cmds: ['ban','kick','warn','timeout','clear','nuke','lock','unlock','slowmode','tempban','softban','cases','announce','role','modlogs','modnote','unban'] },
@@ -16,13 +17,10 @@ const categories = [
 ];
 
 function mainEmbed(botUser) {
-  return new EmbedBuilder()
-    .setColor(0x5865F2)
-    .setTitle('📋 Lista de Comandos — System 777')
-    .setDescription('Usa los botones para navegar por categorías.\nEscribe `/<comando>` para usar.')
-    .setThumbnail(botUser?.displayAvatarURL({ dynamic: true }))
-    .addFields(categories.map(c => ({ name: c.name, value: c.cmds.map(c => `\`/${c}\``).join(', '), inline: false })))
-    .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' });
+  return infoEmbed('📋 Lista de Comandos — System 777', 'Usa los botones para navegar por categorías.\nEscribe `/<comando>` para usar.', {
+    thumbnail: botUser?.displayAvatarURL({ dynamic: true }),
+    fields: categories.map(c => ({ name: c.name, value: c.cmds.map(c => `\`/${c}\``).join(', '), inline: false }))
+  });
 }
 
 function buildRows() {

@@ -2,9 +2,14 @@ const https = require('https');
 const db = require('../utils/db');
 const { EmbedBuilder } = require('discord.js');
 
-function httpsGet(url) {
+function httpsGet(url, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
+    if (maxRedirects <= 0) return reject(new Error('too many redirects'));
     const req = https.get(url, { headers: { 'User-Agent': 'System777Bot/1.0' } }, res => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        return httpsGet(res.headers.location, maxRedirects - 1).then(resolve, reject);
+      }
       let raw = '';
       res.on('data', c => raw += c);
       res.on('end', () => resolve(raw));
@@ -63,6 +68,7 @@ async function checkTwitchAlerts(client) {
     if (!key.startsWith('twitch_')) continue;
     try {
       const html = await httpsGet(`https://www.twitch.tv/${cfg.twitchUsername}`);
+      if (!html || html.length < 1000) continue;
       const isLive = html.includes('"isLiveBroadcast"') || html.includes('"stream":{"id"');
       if (isLive === cfg.isLive) continue;
 

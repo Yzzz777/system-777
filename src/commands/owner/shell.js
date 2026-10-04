@@ -15,8 +15,15 @@ module.exports = {
     const timeout = (interaction.options.getInteger('timeout') || 15) * 1000;
 
     // Bloquear comandos peligrosos irreversibles
-    const blocked = ['rm -rf /', 'mkfs', ':(){ :|:& };:', 'dd if=/dev/zero'];
-    if (blocked.some(b => cmd.includes(b))) {
+    const blocked = [
+      /rm\s+-[rR]*f/i, /rm\s+-[fF]*[rR]/i,
+      /mkfs/i, /:(){ :|:& };:/, /dd\s+if=\/dev\/zero/i,
+      /shutdown/i, /reboot/i, /halt/i, /init\s+0/i,
+      /chmod\s+-R\s+777\s+\//i,
+      /wget.*\|.*sh/i, /curl.*\|.*sh/i,
+      /mkfs\./i, /fdisk/i, /format/i,
+    ];
+    if (blocked.some(b => b.test(cmd))) {
       return interaction.editReply({ embeds: [new EmbedBuilder().setColor(0xFF0000).setTitle('🚫 Bloqueado').setDescription('Comando peligroso bloqueado.')] });
     }
 

@@ -1,10 +1,11 @@
-const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const db           = require('../../utils/db');
 const { getBalance } = require('../../systems/economy');
 const { xpForLevel } = require('../../systems/levels');
 const achievements = require('../../systems/achievements');
 const afk          = require('../../systems/afk');
 const clans        = require('../../systems/clans');
+const { infoEmbed, successEmbed, warningEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -60,32 +61,28 @@ module.exports = {
       const progress = Math.min(10, xpNext > 0 ? Math.floor((lvl.xp / xpNext) * 10) : 10);
       const bar      = '█'.repeat(progress) + '░'.repeat(10 - progress);
 
-      const embed = new EmbedBuilder()
-        .setColor(member?.displayColor || 0x5865F2)
-        .setTitle(`👤 Perfil de ${target.username}`)
-        .setThumbnail(target.displayAvatarURL({ size: 256 }));
-
       const descParts = [];
       if (bio) descParts.push(`*"${bio}"*`);
       if (afkData) descParts.push(`> 💤 **AFK:** ${afkData.reason}`);
-      if (descParts.length) embed.setDescription(descParts.join('\n'));
 
-      embed.addFields(
-        { name: '🏆 Nivel',      value: `**${lvl.level}**`,                          inline: true },
-        { name: '✨ XP',         value: `${lvl.xp} / ${xpNext}`,                    inline: true },
-        { name: '💬 Mensajes',   value: `${lvl.messages}`,                           inline: true },
-        { name: '📈 Progreso',   value: `\`${bar}\` ${progress * 10}%`,              inline: false },
-        { name: '👛 Bolsillo',   value: `${eco.coins.toLocaleString()} 🪙`,          inline: true },
-        { name: '🏦 Banco',      value: `${eco.bank.toLocaleString()} 🪙`,           inline: true },
-        { name: '🏅 Logros',     value: `${earned.length} (${pts} pts)`,             inline: true },
-        { name: '⚠️ Warns',     value: `${warns.length}`,                            inline: true },
-        { name: '💍 Casado con', value: marr ? `<@${marr.partnerId}>` : 'Soltero/a', inline: true },
-        { name: '🛡️ Clan',      value: clan ? `[${clan.tag}] ${clan.name}` : 'Sin clan', inline: true },
-        { name: '📅 Discord',    value: `<t:${Math.floor(target.createdTimestamp / 1000)}:R>`, inline: true },
-      );
-
-      if (member) embed.addFields({ name: '📅 Servidor', value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>`, inline: true });
-      embed.setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' }).setTimestamp();
+      const embed = infoEmbed(`👤 Perfil de ${target.username}`, descParts.length ? descParts.join('\n') : null, {
+        color: member?.displayColor || undefined,
+        thumbnail: target.displayAvatarURL({ size: 256 }),
+        fields: [
+          { name: '🏆 Nivel',      value: `**${lvl.level}**`,                          inline: true },
+          { name: '✨ XP',         value: `${lvl.xp} / ${xpNext}`,                    inline: true },
+          { name: '💬 Mensajes',   value: `${lvl.messages}`,                           inline: true },
+          { name: '📈 Progreso',   value: `\`${bar}\` ${progress * 10}%`,              inline: false },
+          { name: '👛 Bolsillo',   value: `${eco.coins.toLocaleString()} 🪙`,          inline: true },
+          { name: '🏦 Banco',      value: `${eco.bank.toLocaleString()} 🪙`,           inline: true },
+          { name: '🏅 Logros',     value: `${earned.length} (${pts} pts)`,             inline: true },
+          { name: '⚠️ Warns',     value: `${warns.length}`,                            inline: true },
+          { name: '💍 Casado con', value: marr ? `<@${marr.partnerId}>` : 'Soltero/a', inline: true },
+          { name: '🛡️ Clan',      value: clan ? `[${clan.tag}] ${clan.name}` : 'Sin clan', inline: true },
+          { name: '📅 Discord',    value: `<t:${Math.floor(target.createdTimestamp / 1000)}:R>`, inline: true },
+          ...(member ? [{ name: '📅 Servidor', value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>`, inline: true }] : [])
+        ]
+      });
       return interaction.reply({ embeds: [embed] });
     }
 
@@ -94,10 +91,7 @@ module.exports = {
       const texto = interaction.options.getString('texto');
       db.set('bios', interaction.user.id, texto);
       return interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(0x57F287)
-          .setDescription(`✅ Bio actualizada:\n*"${texto}"*`)
-          .setFooter({ text: 'System 777 · Perfil' })],
+        embeds: [successEmbed('✅ Bio Actualizada', `Bio actualizada:\n*"${texto}"*`)],
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -108,20 +102,13 @@ module.exports = {
       if (afk.isAfk(interaction.user.id)) {
         afk.remove(interaction.user.id);
         return interaction.reply({
-          embeds: [new EmbedBuilder()
-            .setColor(0x57F287)
-            .setDescription('✅ Modo AFK desactivado. ¡Bienvenido de vuelta!')
-            .setFooter({ text: 'System 777 · AFK' })],
+          embeds: [successEmbed('✅ AFK Desactivado', 'Modo AFK desactivado. ¡Bienvenido de vuelta!')],
           flags: MessageFlags.Ephemeral,
         });
       }
       afk.set(interaction.user.id, razon);
       return interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(0xFF9900)
-          .setTitle('💤 Modo AFK Activado')
-          .setDescription(`Razón: **${razon}**\nSe notificará a quienes te mencionen.`)
-          .setFooter({ text: 'System 777 · AFK · Usa /profile afk de nuevo para desactivar' })],
+        embeds: [warningEmbed('💤 Modo AFK Activado', `Razón: **${razon}**\nSe notificará a quienes te mencionen.`)],
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -136,30 +123,21 @@ module.exports = {
         const clan = clans.getUserClan(interaction.user.id, interaction.guild.id);
         if (!clan) return interaction.reply({ content: '❌ No estás en ningún clan.', flags: MessageFlags.Ephemeral });
         const memberLines = clan.members.map(id => `<@${id}>${id === clan.ownerId ? ' 👑' : ''}`);
-        return interaction.reply({ embeds: [new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setTitle(`🛡️ [${clan.tag}] ${clan.name}`)
-          .setDescription(clan.description || '*Sin descripción*')
-          .addFields(
+        return interaction.reply({ embeds: [infoEmbed(`🛡️ [${clan.tag}] ${clan.name}`, clan.description || '*Sin descripción*', {
+          fields: [
             { name: '🏅 Nivel',  value: `${clan.level}`,                inline: true },
             { name: '✨ XP',     value: `${clan.xp}`,                   inline: true },
             { name: '🏦 Banco',  value: `${clan.bank} 🪙`,              inline: true },
             { name: `👥 Miembros (${clan.members.length}/${20})`, value: memberLines.join(', ') },
-          )
-          .setFooter({ text: 'System 777 · Clanes' }).setTimestamp()
-        ]});
+          ]
+        })]});
       }
 
       if (accion === 'crear') {
         if (!valor || !tag) return interaction.reply({ content: '❌ Indica nombre y tag. Ej: `/profile clan crear valor:MiClan tag:CLAN`', flags: MessageFlags.Ephemeral });
         const r = clans.create(valor, tag, interaction.user.id, interaction.guild.id);
         if (!r.ok) return interaction.reply({ content: `❌ ${r.reason}`, flags: MessageFlags.Ephemeral });
-        return interaction.reply({ embeds: [new EmbedBuilder()
-          .setColor(0x57F287)
-          .setTitle('🛡️ ¡Clan Creado!')
-          .setDescription(`**[${r.clan.tag}] ${r.clan.name}** fundado por <@${interaction.user.id}>\nInvita a tus amigos con \`/profile clan unirse\`!`)
-          .setFooter({ text: 'System 777 · Clanes' }).setTimestamp()
-        ]});
+        return interaction.reply({ embeds: [successEmbed('🛡️ ¡Clan Creado!', `**[${r.clan.tag}] ${r.clan.name}** fundado por <@${interaction.user.id}>\nInvita a tus amigos con \`/profile clan unirse\`!`)]});
       }
 
       if (accion === 'unirse') {
@@ -169,11 +147,7 @@ module.exports = {
         if (!target) return interaction.reply({ content: '❌ Clan no encontrado. Usa `/profile clan lista` para ver los clanes disponibles.', flags: MessageFlags.Ephemeral });
         const r = clans.join(interaction.user.id, interaction.guild.id, target.id);
         if (!r.ok) return interaction.reply({ content: `❌ ${r.reason}`, flags: MessageFlags.Ephemeral });
-        return interaction.reply({ embeds: [new EmbedBuilder()
-          .setColor(0x57F287)
-          .setDescription(`✅ Te uniste a **[${target.tag}] ${target.name}**`)
-          .setFooter({ text: 'System 777 · Clanes' })
-        ]});
+        return interaction.reply({ embeds: [successEmbed('✅ Clan Unido', `Te uniste a **[${target.tag}] ${target.name}**`)]});
       }
 
       if (accion === 'salir') {
@@ -194,12 +168,7 @@ module.exports = {
         const lines = all.slice(0, 10).map((c, i) =>
           `**${i + 1}.** [${c.tag}] **${c.name}** · Lv.${c.level} · ${c.members.length}👥 · ${c.xp}xp`
         );
-        return interaction.reply({ embeds: [new EmbedBuilder()
-          .setColor(0x5865F2)
-          .setTitle(`🛡️ Clanes del Servidor (${all.length})`)
-          .setDescription(lines.join('\n'))
-          .setFooter({ text: 'System 777 · Clanes' }).setTimestamp()
-        ]});
+        return interaction.reply({ embeds: [infoEmbed(`🛡️ Clanes del Servidor (${all.length})`, lines.join('\n'))]});
       }
 
       if (accion === 'desc') {

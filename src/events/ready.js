@@ -256,6 +256,32 @@ module.exports = {
     // ── 7. REANUDAR SORTEOS ACTIVOS ───────────────────────────────
     resumeAll(client);
 
+    // ── 7b. REANUDAR TEMPBANS PENDIENTES ───────────────────────────
+    try {
+      const allTempbans = db.all('tempbans');
+      for (const [key, entry] of Object.entries(allTempbans)) {
+        const [guildId, userId] = key.split('_');
+        const remaining = entry.expiresAt - Date.now();
+        if (remaining <= 0) {
+          const guild = client.guilds.cache.get(guildId);
+          if (guild) await guild.bans.remove(userId, 'Tempban expirado (reanudado)').catch(() => {});
+          db.del('tempbans', key);
+        } else {
+          const guild = client.guilds.cache.get(guildId);
+          if (guild) {
+            setTimeout(async () => {
+              await guild.bans.remove(userId, `Tempban expirado (${entry.duration || ''})`).catch(() => {});
+              db.del('tempbans', key);
+            }, remaining);
+          } else {
+            db.del('tempbans', key);
+          }
+        }
+      }
+    } catch (e) {
+      logger.warn(`Tempban reanudación: ${e.message}`);
+    }
+
     // ── 8b. AUTO-START VPS MONITOR (si estaba activo) ─────────────
     try {
       const monCfg = db.get('bot_config', 'vps_monitor') || {};

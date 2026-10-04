@@ -121,7 +121,7 @@ module.exports = {
             { name: '⏰ Termina',  value: `<t:${Math.floor(endTime / 1000)}:R>`, inline: true },
             { name: '📢 Canal',    value: canal.toString(),         inline: true },
           )
-          .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })],
+          .setFooter({ text: 'System 777 • jrsystem7777.com' })],
         flags: MessageFlags.Ephemeral
       });
     }
@@ -178,7 +178,7 @@ module.exports = {
             .setColor(0x5865F2)
             .setTitle('🔁 Reroll — Nuevos Ganadores')
             .setDescription(`**Premio:** ${gw.prize}\n\n${winners.map(id => `🏆 <@${id}>`).join('\n')}`)
-            .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })
+            .setFooter({ text: 'System 777 • jrsystem7777.com' })
             .setTimestamp()]
         });
       }
@@ -204,7 +204,7 @@ module.exports = {
           .setColor(0xF5C518)
           .setTitle('🎉 Sorteos Activos')
           .setDescription(lines.join('\n'))
-          .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })],
+          .setFooter({ text: 'System 777 • jrsystem7777.com' })],
         flags: MessageFlags.Ephemeral
       });
     }
@@ -230,7 +230,7 @@ module.exports = {
               .setColor(0xFF4444)
               .setTitle('❌ SORTEO CANCELADO')
               .setDescription(`~~${gw.prize}~~`)
-              .setFooter({ text: 'System 777 · Dev: 777 · IG: @yzz.yzx' })],
+              .setFooter({ text: 'System 777 • jrsystem7777.com' })],
             components: [buildRow(msgId, true)]
           });
         }

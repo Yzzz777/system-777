@@ -1,5 +1,6 @@
-﻿const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const db = require('../../utils/db');
+const { errorEmbed, successEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -19,12 +20,9 @@ module.exports = {
     const gbans = db.get('globalbans', 'users', {});
     if (gbans[id] && interaction.user.id !== process.env.OWNER_ID) {
       return interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(0xFF0000)
-          .setTitle('⛔ Ban Global — No puedes levantar este ban')
-          .setDescription(`\`${id}\` tiene un **ban global permanente**.\nSolo el owner del bot puede levantarlo con \`/globalban remove\`.`)
-          .addFields({ name: 'Razón del ban global', value: gbans[id].reason })
-          .setFooter({ text: 'System 777 · Developer 777' })],
+        embeds: [errorEmbed('⛔ Ban Global — No puedes levantar este ban', `\`${id}\` tiene un **ban global permanente**.\nSolo el owner del bot puede levantarlo con \`/globalban remove\`.`, {
+          fields: [{ name: 'Razón del ban global', value: gbans[id].reason }]
+        })],
         flags: MessageFlags.Ephemeral
       });
     }
@@ -34,15 +32,13 @@ module.exports = {
       await interaction.guild.bans.remove(id, `${reason} | Mod: ${interaction.user.tag}`);
 
       await interaction.reply({
-        embeds: [new EmbedBuilder()
-          .setColor(0x00FF88)
-          .setTitle('✅ Usuario Desbaneado')
-          .addFields(
+        embeds: [successEmbed('✅ Usuario Desbaneado', null, {
+          fields: [
             { name: 'Usuario',   value: `${ban.user.tag} \`(${id})\``, inline: true },
             { name: 'Moderador', value: interaction.user.tag,           inline: true },
             { name: 'Razón',     value: reason }
-          )
-          .setFooter({ text: 'System 777 · Developer 777' })]
+          ]
+        })]
       });
     } catch {
       await interaction.reply({ content: `❌ No encontré un ban para el ID \`${id}\`.`, flags: MessageFlags.Ephemeral });

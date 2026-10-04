@@ -1,4 +1,5 @@
-﻿const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { modEmbed } = require('../../utils/embeds');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -18,19 +19,21 @@ module.exports = {
 
     await interaction.deferReply();
     await target.ban({ reason, deleteMessageSeconds: 7 * 86400 });
-    await interaction.guild.bans.remove(target.id, 'Softban — desbaneado automáticamente');
+    try {
+      await interaction.guild.bans.remove(target.id, 'Softban — desbaneado automáticamente');
+    } catch (e) {
+      return interaction.editReply({ content: `❌ Usuario baneado pero no pude desbanearlo: ${e.message}. Banealo manualmente con \`/unban\`.`, flags: MessageFlags.Ephemeral });
+    }
 
     await interaction.editReply({
-      embeds: [new EmbedBuilder()
-        .setColor(0xFF6600)
-        .setTitle('🔄 Softban Aplicado')
-        .addFields(
+      embeds: [modEmbed('🔄 Softban Aplicado', null, {
+        fields: [
           { name: 'Usuario',   value: `${target.user.tag} \`(${target.id})\``, inline: true },
           { name: 'Moderador', value: interaction.user.tag,                      inline: true },
           { name: 'Razón',     value: reason },
           { name: 'Efecto',    value: 'Mensajes de los últimos 7 días eliminados. Usuario puede reingresar.' }
-        )
-        .setFooter({ text: 'System 777 · Developer 777' })]
+        ]
+      })]
     });
   }
 };
