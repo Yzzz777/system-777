@@ -227,9 +227,16 @@ function buildPanel(cfg, guild) {
   if (cfg.panelImage) embed.setImage(cfg.panelImage);
 
   const categories = (cfg.categories ?? []).filter(c => c.status !== 'inactive' && c.status !== 'disabled');
+  const seenValues = new Set();
+  const uniqueCategories = categories.filter(c => {
+    const v = String(c.categoryId || c.id);
+    if (seenValues.has(v)) return false;
+    seenValues.add(v);
+    return true;
+  });
 
-  if (categories.length > 0) {
-    const catLines = categories.map(c => `${c.emoji || '🎫'} **${c.label}** — ${c.description || 'Sin descripción'}`);
+  if (uniqueCategories.length > 0) {
+    const catLines = uniqueCategories.map(c => `${c.emoji || '🎫'} **${c.label}** — ${c.description || 'Sin descripción'}`);
     const shownLines = [];
     let linesLen = 0;
     for (const line of catLines) {
@@ -242,11 +249,11 @@ function buildPanel(cfg, guild) {
 
   const components = [];
 
-  if (categories.length > 0) {
+  if (uniqueCategories.length > 0) {
     const select = new StringSelectMenuBuilder()
       .setCustomId('tkt_select')
       .setPlaceholder('📂 Selecciona el tipo de soporte...')
-      .addOptions(categories.slice(0, 25).map(c => {
+      .addOptions(uniqueCategories.slice(0, 25).map(c => {
         const opt = {
           label: c.label || 'Categoría',
           value: c.categoryId || String(c.id),

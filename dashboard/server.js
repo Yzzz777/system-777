@@ -487,20 +487,22 @@ module.exports = function startDashboard(client) {
     const bodyCategories = d.categories;
     if (Array.isArray(bodyCategories)) {
       const existing = await ticketDb.getCategories(req.params.guildId);
+      const matchedRowIds = new Set();
       for (const cat of bodyCategories) {
-        if (cat.id) {
-          const found = existing.find(c => c.id === cat.id);
-          if (found) {
-            await ticketDb.updateCategory(cat.id, cat);
-            try {
-              await ticketDb.logAction(req.params.guildId, null, null, 'category_updated', req.session.user.id, req.session.user.username, { categoryId: cat.id, label: cat.label });
-            } catch (e) { console.error('[DASHBOARD] logAction error:', e.message); }
-          } else {
-            await ticketDb.addCategory(req.params.guildId, cat);
-            try {
-              await ticketDb.logAction(req.params.guildId, null, null, 'category_added', req.session.user.id, req.session.user.username, { categoryId: cat.id, label: cat.label });
-            } catch (e) { console.error('[DASHBOARD] logAction error:', e.message); }
-          }
+        const found = cat.id
+          ? existing.find(c => !matchedRowIds.has(c.id) && (String(c.id) === String(cat.id) || String(c.categoryId) === String(cat.id) || (cat.categoryId && String(c.categoryId) === String(cat.categoryId))))
+          : null;
+        if (found) {
+          matchedRowIds.add(found.id);
+          await ticketDb.updateCategory(found.id, cat);
+          try {
+            await ticketDb.logAction(req.params.guildId, null, null, 'category_updated', req.session.user.id, req.session.user.username, { categoryId: cat.id, label: cat.label });
+          } catch (e) { console.error('[DASHBOARD] logAction error:', e.message); }
+        } else if (cat.id) {
+          await ticketDb.addCategory(req.params.guildId, cat);
+          try {
+            await ticketDb.logAction(req.params.guildId, null, null, 'category_added', req.session.user.id, req.session.user.username, { categoryId: cat.id, label: cat.label });
+          } catch (e) { console.error('[DASHBOARD] logAction error:', e.message); }
         } else {
           await ticketDb.addCategory(req.params.guildId, cat);
           try {
