@@ -722,6 +722,30 @@ module.exports = {
       }
     }
 
+    // ── Permisos de Roles: DENEGACIÓN por rol y comando (dashboard) ─────────
+    if (interaction.guildId && !isOwner) {
+      const store = db.get('rolePerms', interaction.guildId) || {};
+      if (store && typeof store === 'object' && !Array.isArray(store) && Object.keys(store).length) {
+        const memberRoles = interaction.member?.roles;
+        const roleIds = Array.isArray(memberRoles)
+          ? memberRoles
+          : (memberRoles?.cache ? [...memberRoles.cache.keys()] : []);
+        // @everyone participa también (su roleId es el del servidor)
+        const deniedRole = [interaction.guildId, ...roleIds]
+          .find(id => Array.isArray(store[id]) && store[id].includes(interaction.commandName));
+        if (deniedRole) {
+          return interaction.reply({
+            embeds: [new EmbedBuilder()
+              .setColor(COLORS.error)
+              .setTitle('🔒 Permiso denegado')
+              .setDescription(`El rol <@&${deniedRole}> no puede usar \`${interaction.commandName}\` en este servidor.\n\nPídele a un administrador que lo cambie desde el dashboard → **Permisos de Roles**.`)
+              .setFooter({ text: `${FOOTER_BASE} • Permisos de Roles` })],
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+    }
+
     // Track analytics + mission progress
     try {
       const stats = db.get('analytics', 'commands_used') || {};

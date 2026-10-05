@@ -82,6 +82,7 @@ for (const cat of categories) {
   for (const file of files) {
     const cmd = require(path.join(commandsPath, cat, file));
     if (!cmd.data?.name) continue;
+    cmd.category = cat;
     client.commands.set(cmd.data.name, cmd);
     cmdCount++;
   }

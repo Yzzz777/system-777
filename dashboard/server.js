@@ -1285,6 +1285,53 @@ module.exports = function startDashboard(client) {
   app.get('/api/public/guild/:id/activity-logs', auth, sendActivityLogs);
   app.get('/api/guild/:id/activity-logs', auth, canManageGuild, sendActivityLogs);
 
+  // ── Permisos de Roles: DENEGACIÓN por rol y comando ─────────────────────────
+  // Solo guardamos qué comandos NO puede usar cada rol (namespace 'rolePerms').
+  function rolePermStore(guildId) {
+    const raw = db.get('rolePerms', guildId, {});
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  }
+
+  function commandList() {
+    const out = [];
+    for (const cmd of client.commands.values()) {
+      if (!cmd.data?.name) continue;
+      out.push({
+        name: cmd.data.name,
+        category: cmd.category || 'utility',
+        description: String(cmd.data.description || '').slice(0, 120),
+      });
+    }
+    return out.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+  }
+
+  app.get('/api/guild/:id/roleperms', auth, canManageGuild, (req, res) => {
+    res.json({ ok: true, rolePerms: rolePermStore(req.params.id), commands: commandList() });
+  });
+
+  app.post('/api/guild/:id/roleperms', auth, canManageGuild, (req, res) => {
+    const guild = client.guilds.cache.get(req.params.id);
+    if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
+
+    const { roleId, deny } = req.body || {};
+    if (!roleId || typeof roleId !== 'string' || !guild.roles.cache.has(roleId)) {
+      return res.status(400).json({ ok: false, msg: 'Rol no válido' });
+    }
+    if (!Array.isArray(deny)) {
+      return res.status(400).json({ ok: false, msg: 'deny debe ser un array de comandos' });
+    }
+
+    const known = new Set(client.commands.keys());
+    const clean = [...new Set(deny.map(String))].filter(c => known.has(c)).sort();
+
+    const store = rolePermStore(req.params.id);
+    if (clean.length) store[roleId] = clean;
+    else delete store[roleId];
+    db.set('rolePerms', req.params.id, store);
+
+    res.json({ ok: true, rolePerms: store });
+  });
+
   // ── Role Management ──────────────────────────────────────────────────────────
   app.get('/api/public/guild/:id/roles', (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
