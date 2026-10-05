@@ -1,6 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const sysLogger = require('../../systems/logger');
-const db = require('../../utils/db');
 const { modEmbed } = require('../../utils/embeds');
 
 module.exports = {
@@ -25,7 +24,6 @@ module.exports = {
     } catch (e) {
       return interaction.editReply({ content: `❌ No pude expulsar: ${e.message}`, flags: MessageFlags.Ephemeral });
     }
-    db.logActivity(interaction.guild.id, { actionType: 'kick', userId: interaction.user.id, targetId: target.id, details: `Kick: ${target.user.tag} | Razón: ${reason}` });
 
     const embed = modEmbed('👢 Usuario Expulsado', null, {
       thumbnail: target.user.displayAvatarURL(),

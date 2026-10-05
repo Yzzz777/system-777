@@ -1,7 +1,6 @@
 const sysLogger  = require('../systems/logger');
 const { sendWelcome } = require('../systems/welcome');
 const shield     = require('../systems/botShield');
-const db         = require('../utils/db');
 
 module.exports = {
   name: 'guildMemberRemove',
@@ -12,6 +11,5 @@ module.exports = {
     }
     await sysLogger.logLeave(member.guild, member);
     await sendWelcome(member, 'goodbye');
-    db.logActivity(member.guild.id, { actionType: 'other', userId: member.id, details: `Miembro salido: ${member.user.tag}` });
   }
 };

@@ -193,6 +193,21 @@ setInterval(() => {
 
 // Limpieza de datos stale cada hora (nulls purgados + expiraciones)
 try { require('./utils/db').cleanup(); } catch (e) { logger.warn(`cleanup inicial: ${e.message}`); }
+// Migración de la config de canales de log (claves muertas → log_<bucket>)
+try { require('./systems/logger').migrateLogConfigs(); } catch (e) { logger.warn(`migración de logs: ${e.message}`); }
+// Migración de warns/modlogs legacy (warn_<g>_<u> y mod_<g> → forma canónica)
+try {
+  const modLog = require('./systems/modLog');
+  const ids = new Set();
+  for (const k of Object.keys(require('./utils/db').all('modlogs') || {})) {
+    if (k.startsWith('mod_')) ids.add(k.slice(4));
+  }
+  for (const k of Object.keys(require('./utils/db').all('warns') || {})) {
+    if (k.startsWith('warn_')) ids.add(k.split('_')[1]);
+  }
+  for (const gid of ids) modLog.migrate(gid);
+  if (ids.size) logger.info(`[MODLOG] ${ids.size} servidor(es) migrados a la forma canónica de warns/modlogs.`);
+} catch (e) { logger.warn(`migración de modlogs: ${e.message}`); }
 setInterval(() => {
   try {
     const db = require('./utils/db');

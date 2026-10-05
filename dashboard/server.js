@@ -6,6 +6,9 @@ const { exec } = require('child_process');
 const db      = require('../src/utils/db');
 const ticketDb = require('../src/utils/ticketDb');
 const ipBan   = require('../src/systems/ipBan');
+const sysLogger = require('../src/systems/logger');
+const modLog   = require('../src/systems/modLog');
+const { createCase } = require('../src/commands/moderation/cases');
 
 // ── Discord API helpers ───────────────────────────────────────────────────────
 function discordGet(endpoint, token) {
@@ -16,7 +19,14 @@ function discordGet(endpoint, token) {
     }, res => {
       let raw = '';
       res.on('data', c => raw += c);
-      res.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+      res.on('end', () => {
+        // Sin esto un 401 de Discord se devolvía como {} y el middleware
+        // montaba una sesión rota en vez de responder 401.
+        if (res.statusCode >= 400) {
+          return reject(new Error(`Discord API ${res.statusCode} en ${endpoint}`));
+        }
+        try { resolve(JSON.parse(raw)); } catch { resolve({}); }
+      });
     });
     req.on('error', reject);
     req.end();
@@ -42,7 +52,12 @@ function discordExchange(code, callbackUrl) {
     }, res => {
       let raw = '';
       res.on('data', c => raw += c);
-      res.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+      res.on('end', () => {
+        if (res.statusCode >= 400) {
+          return reject(new Error(`Discord token exchange ${res.statusCode}`));
+        }
+        try { resolve(JSON.parse(raw)); } catch { resolve({}); }
+      });
     });
     req.on('error', reject);
     req.write(body);
@@ -365,7 +380,8 @@ module.exports = function startDashboard(client) {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
 
-    const config = db.get('guilds', req.params.id, {});
+    const config = { ...db.get('guilds', req.params.id, {}) };
+    config.logChannels = logChannelsFor(config);
 
     const channels = [...guild.channels.cache.values()]
       .filter(c => [0, 2, 4, 5].includes(c.type))
@@ -397,6 +413,49 @@ module.exports = function startDashboard(client) {
     cfg[key] = value;
     db.set('guilds', guildId, cfg);
     return cfg[key];
+  }
+
+  // ── Canales de log (canónico: log_<bucket> + log_<categoria>) ───────────
+  // El bot lee log_<categoria> → log_<bucket> → logChannel (systems/logger.js)
+  const LOG_GROUPS = {
+    moderation: ['mod', 'ban', 'unban', 'kick', 'warn', 'timeout'],
+    messages:   ['delete', 'edit'],
+    members:    ['join', 'leave', 'nick'],
+    channels:   ['channel_create', 'channel_delete', 'channel_update'],
+    roles:      ['role_add', 'role_remove', 'role_create', 'role_update'],
+    voice:      ['voice_join', 'voice_leave', 'voice_move'],
+  };
+
+  function logChannelsFor(cfg) {
+    const out = {};
+    for (const [bucket, cats] of Object.entries(LOG_GROUPS)) {
+      let id = cfg[`log_${bucket}`] || '';
+      if (!id) {
+        for (const cat of cats) {
+          if (cfg[`log_${cat}`]) { id = cfg[`log_${cat}`]; break; }
+        }
+      }
+      if (!id) id = cfg.logChannel || '';
+      out[bucket] = id;
+    }
+    return out;
+  }
+
+  function applyLogChannels(cfg, body) {
+    if (!body || typeof body !== 'object') return false;
+    let touched = false;
+    for (const [bucket, cats] of Object.entries(LOG_GROUPS)) {
+      if (!(bucket in body)) continue;
+      const id = body[bucket] ? String(body[bucket]) : '';
+      if (id) cfg[`log_${bucket}`] = id;
+      else delete cfg[`log_${bucket}`];
+      for (const cat of cats) {
+        if (id) cfg[`log_${cat}`] = id;
+        else delete cfg[`log_${cat}`];
+      }
+      touched = true;
+    }
+    return touched;
   }
 
   app.get('/api/public/ticket/:guildId', async (req, res) => {
@@ -564,8 +623,12 @@ module.exports = function startDashboard(client) {
   app.post('/api/public/guild/:id/logs', auth, canManageGuild, (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
-    publicSaveConfig(req.params.id, 'logs', req.body);
-    res.json({ ok: true });
+    const cfg = db.get('guilds', req.params.id, {});
+    if (!applyLogChannels(cfg, req.body)) {
+      return res.status(400).json({ ok: false, msg: 'Sin canales de log válidos' });
+    }
+    db.set('guilds', req.params.id, cfg);
+    res.json({ ok: true, logChannels: logChannelsFor(cfg) });
   });
 
   app.post('/api/public/guild/:id/tickets/setup', auth, canManageGuild, async (req, res) => {
@@ -778,10 +841,19 @@ module.exports = function startDashboard(client) {
   });
 
   // ── Activity Logs endpoint ────────────────────────────────────────────────
-  app.get('/api/public/guild/:id/logs', (req, res) => {
+  // Única implementación: normaliza las 3 formas legacy de activityLogs y
+  // devuelve las últimas 200 entradas en la forma que consume la web.
+  function sendActivityLogs(req, res) {
     const logs = db.get('activityLogs', req.params.id, []);
-    res.json({ ok: true, logs: Array.isArray(logs) ? logs.slice(-200).reverse() : [] });
-  });
+    const list = (Array.isArray(logs) ? logs.slice(-200) : [])
+      .map(db.normalizeActivityEntry)
+      .filter(Boolean)
+      .reverse();
+    res.json({ ok: true, logs: list });
+  }
+
+  // Requiere sesión: expone IDs de usuario y contenido de mensajes.
+  app.get('/api/public/guild/:id/logs', auth, sendActivityLogs);
 
   // ── Slowmode endpoint ────────────────────────────────────────────────────
   app.post('/api/public/guild/:id/slowmode', auth, canManageGuild, async (req, res) => {
@@ -804,7 +876,8 @@ module.exports = function startDashboard(client) {
       const guild = client.guilds.cache.get(req.params.id);
       if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
 
-      const config = db.get('guilds', req.params.id, {});
+      const config = { ...db.get('guilds', req.params.id, {}) };
+      config.logChannels = logChannelsFor(config);
       const ticketConfig = await ticketDb.getConfig(req.params.id) || {};
       const ticketCategories = await ticketDb.getCategories(req.params.id);
       ticketConfig.categories = ticketCategories;
@@ -974,9 +1047,11 @@ module.exports = function startDashboard(client) {
   app.post('/api/guild/:id/logs', auth, canManageGuild, (req, res) => {
     try {
       const config = db.get('guilds', req.params.id, {});
-      config.logChannels = { ...(config.logChannels || {}), ...req.body };
+      if (!applyLogChannels(config, req.body)) {
+        return res.status(400).json({ ok: false, msg: 'Sin canales de log válidos' });
+      }
       db.set('guilds', req.params.id, config);
-      res.json({ ok: true });
+      res.json({ ok: true, logChannels: logChannelsFor(config) });
     } catch (error) {
       console.error('[DASHBOARD ERROR] POST /api/guild/:id/logs:', error);
       res.status(500).json({ ok: false, msg: 'Error interno del servidor' });
@@ -1057,34 +1132,87 @@ module.exports = function startDashboard(client) {
   });
 
   // ── Quick mod action ─────────────────────────────────────────────────────────
+  // Toda acción deja traza en 4 sitios: caso (mod_cases), activityLogs,
+  // modLog (modlogs) y el canal de logs de Discord.
+  const ACTION_CASE_TYPES = { ban: 'ban', kick: 'kick', timeout: 'mute', warn: 'warn' };
+  const ACTION_LABELS     = { ban: 'baneado', kick: 'kickeado', timeout: 'en timeout', warn: 'advertido' };
+
   app.post('/api/guild/:id/action', auth, canManageGuild, async (req, res) => {
     const guild = client.guilds.cache.get(req.params.id);
     if (!guild) return res.status(404).json({ ok: false, msg: 'Bot no está en este servidor' });
     const { action, userId, reason, duration, deleteDays } = req.body;
     if (!action || !userId) return res.status(400).json({ ok: false, msg: 'Faltan parámetros' });
+    if (!ACTION_CASE_TYPES[action]) return res.status(400).json({ ok: false, msg: 'Acción no válida' });
+
+    const modId  = req.session.user?.id || null;
+    const modTag = req.session.user?.username || 'Dashboard';
+    const mod    = { id: modId, tag: modTag };
+    const why    = reason || 'Dashboard';
+
     try {
+      const user = await client.users.fetch(userId).catch(() => null);
+      const member = guild.members.cache.get(userId) || await guild.members.fetch(userId).catch(() => null);
+
       if (action === 'ban') {
-        await guild.bans.create(userId, { reason: reason || 'Dashboard', deleteMessageSeconds: (deleteDays || 0) * 86400 });
-        return res.json({ ok: true, msg: `✅ Baneado` });
+        await guild.bans.create(userId, { reason: why, deleteMessageSeconds: (deleteDays || 0) * 86400 });
+      } else if (action === 'kick') {
+        if (!member) return res.status(404).json({ ok: false, msg: 'Miembro no encontrado en el servidor' });
+        await member.kick(why);
+      } else if (action === 'timeout') {
+        if (!member) return res.status(404).json({ ok: false, msg: 'Miembro no encontrado en el servidor' });
+        await member.timeout((parseInt(duration) || 10) * 60 * 1000, why);
+      } else if (action === 'warn') {
+        const warns = modLog.addWarn(guild.id, userId, { reason: why, mod: modId, by: modTag, ts: Date.now() });
+        const caseId = recordAction(guild, action, userId, user?.tag, mod, why, duration);
+        return res.json({ ok: true, msg: `⚠️ Advertencia registrada (total: ${warns.length}${caseId ? `, caso #${caseId}` : ''})` });
       }
-      const member = await guild.members.fetch(userId).catch(() => null);
-      if (!member) return res.status(404).json({ ok: false, msg: 'Miembro no encontrado en el servidor' });
-      if (action === 'kick') { await member.kick(reason || 'Dashboard'); return res.json({ ok: true, msg: `✅ Kickeado` }); }
-      if (action === 'timeout') {
-        const ms = (parseInt(duration) || 10) * 60 * 1000;
-        await member.timeout(ms, reason || 'Dashboard');
-        return res.json({ ok: true, msg: `✅ Timeout ${duration || 10}m aplicado` });
-      }
-      if (action === 'warn') {
-        const warns = db.get('warns', guild.id, {});
-        if (!warns[userId]) warns[userId] = [];
-        warns[userId].push({ reason: reason || 'Dashboard', by: 'Dashboard', ts: Date.now() });
-        db.set('warns', guild.id, warns);
-        return res.json({ ok: true, msg: `⚠️ Advertencia registrada (total: ${warns[userId].length})` });
-      }
-      res.status(400).json({ ok: false, msg: 'Acción no válida' });
+
+      const caseId = recordAction(guild, action, userId, user?.tag, mod, why, duration);
+      const msgs = {
+        ban:    `✅ Baneado${caseId ? ` (caso #${caseId})` : ''}`,
+        kick:   `✅ Kickeado${caseId ? ` (caso #${caseId})` : ''}`,
+        timeout:`✅ Timeout ${duration || 10}m aplicado${caseId ? ` (caso #${caseId})` : ''}`,
+      };
+      res.json({ ok: true, msg: msgs[action] });
     } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
   });
+
+  // Traza de una acción: modLog + activityLog + caso + embed en Discord.
+  // Devuelve el id del caso creado (null si falló).
+  function recordAction(guild, action, userId, userTag, mod, why, duration) {
+    const label = ACTION_LABELS[action] || action;
+    // modLog lo escribe sysLogger.log* (logBan/logKick/logTimeout/logWarn)
+    try {
+      db.logActivity(guild.id, {
+        type: 'moderation',
+        action: `${userTag || userId} ${label}`,
+        userId: mod?.id, targetId: userId,
+        details: why,
+        executor: mod ? { id: mod.id, tag: mod.tag } : undefined,
+        target:   { id: userId, tag: userTag || userId },
+      });
+    } catch (e) { console.error('[DASHBOARD] logActivity error:', e.message); }
+
+    let caseId = null;
+    try {
+      const caso = createCase(guild.id, {
+        userId, userTag: userTag || userId,
+        modId: mod?.id, modTag: mod?.tag,
+        type: ACTION_CASE_TYPES[action], reason: why,
+      });
+      caseId = caso.id;
+    } catch (e) { console.error('[DASHBOARD] createCase error:', e.message); }
+
+    try {
+      const targetUser = { id: userId, tag: userTag || userId, displayAvatarURL: () => null };
+      if (action === 'ban')    sysLogger.logBan(guild, targetUser, mod, why);
+      if (action === 'kick')   sysLogger.logKick(guild, targetUser, mod, why);
+      if (action === 'timeout')sysLogger.logTimeout(guild, targetUser, mod, `${duration || 10}m`, why);
+      if (action === 'warn')   sysLogger.logWarn(guild, targetUser, mod, why);
+    } catch (e) { console.error('[DASHBOARD] logger error:', e.message); }
+
+    return caseId;
+  }
 
   app.get('/api/guild/:id/tickets/list', auth, canManageGuild, async (req, res) => {
     try {
@@ -1153,16 +1281,9 @@ module.exports = function startDashboard(client) {
     }
   });
 
-  // ── Activity Logs ────────────────────────────────────────────────────────────
-  app.get('/api/public/guild/:id/activity-logs', (req, res) => {
-    const logs = db.get('activityLogs', req.params.id, []);
-    res.json({ ok: true, logs: Array.isArray(logs) ? logs.slice(-200).reverse() : [] });
-  });
-
-  app.get('/api/guild/:id/activity-logs', auth, canManageGuild, (req, res) => {
-    const logs = db.get('activityLogs', req.params.id, []);
-    res.json({ ok: true, logs: Array.isArray(logs) ? logs.slice(-200).reverse() : [] });
-  });
+  // ── Activity Logs (alias) ───────────────────────────────────────────────────
+  app.get('/api/public/guild/:id/activity-logs', auth, sendActivityLogs);
+  app.get('/api/guild/:id/activity-logs', auth, canManageGuild, sendActivityLogs);
 
   // ── Role Management ──────────────────────────────────────────────────────────
   app.get('/api/public/guild/:id/roles', (req, res) => {
@@ -1362,7 +1483,14 @@ module.exports = function startDashboard(client) {
   app.get('/api/cases/:guildId', auth, canManageGuild, (req, res) => {
     const cases = db.get('mod_cases', req.params.guildId) || {};
     const list  = Object.values(cases).sort((a, b) => b.createdAt - a.createdAt);
-    res.json({ ok: true, total: list.length, open: list.filter(c => c.status === 'open').length, cases: list.slice(0, 50) });
+    // Alias que consume la pestaña Moderación de la web
+    const shaped = list.slice(0, 50).map(c => ({
+      ...c,
+      caseNumber: c.caseNumber ?? c.id,
+      targetId:   c.targetId   ?? c.userId,
+      timestamp:  c.timestamp  ?? c.createdAt,
+    }));
+    res.json({ ok: true, total: list.length, open: list.filter(c => c.status === 'open').length, cases: shaped });
   });
 
   // ── Analytics API (owner) ────────────────────────────────────────────────────

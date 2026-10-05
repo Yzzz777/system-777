@@ -52,7 +52,6 @@ module.exports = {
         reason: `${reason} | Moderador: ${interaction.user.tag}${makeGlobal ? ' | GLOBAL' : ''}`,
         deleteMessageSeconds: dias * 86400,
       });
-      db.logActivity(interaction.guild.id, { actionType: 'ban', userId: interaction.user.id, targetId: user.id, details: `Ban: ${user.tag} | Razón: ${reason}` });
     } catch (e) {
       return interaction.editReply({ content: `❌ No pude banear: ${e.message}` });
     }

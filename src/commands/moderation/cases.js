@@ -70,20 +70,12 @@ module.exports = {
       const tipo      = interaction.options.getString('tipo');
       const razon     = interaction.options.getString('razon');
       const evidencia = interaction.options.getString('evidencia') || null;
-      const caseId    = nextCaseId(guildId);
-
-      const caso = {
-        id: caseId, guildId,
+      const caso = createCase(guildId, {
         userId: user.id, userTag: user.tag,
         modId: interaction.user.id, modTag: interaction.user.tag,
         type: tipo, reason: razon, evidence: evidencia,
-        status: 'open', notes: [],
-        createdAt: Date.now(), updatedAt: Date.now()
-      };
-
-      const cases = getCases(guildId);
-      cases[caseId] = caso;
-      saveCases(guildId, cases);
+      });
+      const caseId = caso.id;
 
       // Log to mod log channel if configured
       const cfg   = db.get('guilds', guildId, {});
@@ -267,3 +259,23 @@ module.exports = {
     }
   }
 };
+
+// Crea un caso y lo persiste. Usado por el comando /cases create y por el
+// dashboard (POST /api/guild/:id/action) para que toda acción tenga caso.
+function createCase(guildId, { userId, userTag, modId, modTag, type, reason, evidence = null }) {
+  const caseId = nextCaseId(guildId);
+  const caso = {
+    id: caseId, guildId,
+    userId, userTag: userTag || userId,
+    modId: modId || null, modTag: modTag || null,
+    type, reason: reason || 'Sin razón', evidence: evidence || null,
+    status: 'open', notes: [],
+    createdAt: Date.now(), updatedAt: Date.now()
+  };
+  const cases = getCases(guildId);
+  cases[caseId] = caso;
+  saveCases(guildId, cases);
+  return caso;
+}
+
+module.exports.createCase = createCase;

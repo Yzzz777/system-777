@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const db           = require('../../utils/db');
+const modLog       = require('../../systems/modLog');
 const { getBalance } = require('../../systems/economy');
 const { xpForLevel } = require('../../systems/levels');
 const achievements = require('../../systems/achievements');
@@ -50,7 +51,7 @@ module.exports = {
       const lvl     = db.get('levels',   `${interaction.guild.id}_${target.id}`, { level: 0, xp: 0, messages: 0 });
       const eco     = getBalance(target.id);
       const marr    = db.get('marriages', target.id, null);
-      const warns   = db.get('warns', `warn_${interaction.guild.id}_${target.id}`, []);
+      const warns   = modLog.getWarns(interaction.guild.id, target.id);
       const bio     = db.get('bios', target.id) || null;
       const clan    = clans.getUserClan(target.id, interaction.guild.id);
       const pts     = achievements.getPoints(target.id, interaction.guild.id);

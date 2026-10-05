@@ -1,6 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const ms = require('ms');
-const db = require('../../utils/db');
 const { modEmbed } = require('../../utils/embeds');
 
 module.exports = {
@@ -25,7 +24,8 @@ module.exports = {
       return interaction.reply({ content: '❌ Duración inválida. Usa: `10s`, `5m`, `2h`, `1d` (máx 28 días).', flags: MessageFlags.Ephemeral });
 
     await target.timeout(msTime, `${reason} | Mod: ${interaction.user.tag}`);
-    db.logActivity(interaction.guild.id, { actionType: 'timeout', userId: interaction.user.id, targetId: target.id, details: `Timeout: ${target.user.tag} por ${duration} | Razón: ${reason}` });
+    // Log en activityLogs + embed en el canal de logs del servidor
+    await require('../../systems/logger').logTimeout(interaction.guild, target.user, interaction.user, duration, reason);
 
     await interaction.reply({
       embeds: [modEmbed('⏱️ Timeout Aplicado', null, {

@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
-const db        = require('../../utils/db');
+const modLog   = require('../../systems/modLog');
 const sysLogger = require('../../systems/logger');
 const { warningEmbed, successEmbed } = require('../../utils/embeds');
 
@@ -27,13 +27,13 @@ module.exports = {
   async execute(interaction) {
     const sub    = interaction.options.getSubcommand();
     const target = interaction.options.getUser('usuario');
-    const key    = `warn_${interaction.guild.id}_${target.id}`;
+    const gid    = interaction.guild.id;
 
     if (sub === 'add') {
       const reason = interaction.options.getString('razon');
-      const warns  = db.get('warns', key, []);
-      warns.push({ reason, mod: interaction.user.id, ts: Date.now() });
-      db.set('warns', key, warns);
+      const warns  = modLog.addWarn(gid, target.id, {
+        reason, mod: interaction.user.id, by: interaction.user.tag, ts: Date.now()
+      });
 
       const embed = warningEmbed('⚠️ Advertencia Añadida', null, {
         fields: [
@@ -48,7 +48,7 @@ module.exports = {
       await sysLogger.logWarn(interaction.guild, target, interaction.user, reason);
 
     } else if (sub === 'list') {
-      const warns = db.get('warns', key, []);
+      const warns = modLog.getWarns(gid, target.id);
       const desc  = warns.length
         ? warns.map((w, i) => `**${i+1}.** ${w.reason} — <t:${Math.floor(w.ts/1000)}:R>`).join('\n')
         : 'Sin advertencias.';
@@ -58,7 +58,7 @@ module.exports = {
       });
 
     } else if (sub === 'clear') {
-      db.set('warns', key, []);
+      modLog.clearWarns(gid, target.id);
       await interaction.reply({ content: `✅ Advertencias de **${target.tag}** borradas.`, flags: MessageFlags.Ephemeral });
     }
   }

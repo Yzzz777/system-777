@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const db = require('../../utils/db');
+const modLog = require('../../systems/modLog');
 const { infoEmbed, successEmbed, errorEmbed } = require('../../utils/embeds');
 
 module.exports = {
@@ -127,13 +128,13 @@ module.exports = {
       const user = interaction.options.getUser('usuario') || interaction.user;
       const eco = db.get('economy', user.id, {coins:0,bank:0});
       const lvl = db.get('levels', user.id, {xp:0,level:1});
-      const warns = db.get('warns', user.id, []);
+      const warns = modLog.getWarns(interaction.guild?.id, user.id);
       await interaction.reply({embeds:[infoEmbed(`📊 Stats de ${user.tag}`, null, {
         thumbnail: user.displayAvatarURL({dynamic:true}),
         fields: [
           {name:'💰 Economía',value:`Efectivo: $${eco.coins}\nBanco: $${eco.bank}`,inline:true},
           {name:'⭐ Niveles',value:`Nivel: ${lvl.level}\nXP: ${lvl.xp}`,inline:true},
-          {name:'⚠️ Warns',value:`${Array.isArray(warns)?warns.length:0}`,inline:true}
+          {name:'⚠️ Warns',value:`${warns.length}`,inline:true}
         ]
       })]});
 

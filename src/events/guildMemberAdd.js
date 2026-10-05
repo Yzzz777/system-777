@@ -121,7 +121,6 @@ module.exports = {
 
     console.log(`[EVENT] guildMemberAdd: ${member.user.tag} joined ${member.guild.name}`);
     await sendWelcome(member, 'welcome');
-    db.logActivity(member.guild.id, { actionType: 'welcome', userId: member.id, details: `Miembro unido: ${member.user.tag}` });
 
     const autoRoleIds = cfg.welcome?.autoRole;
     if (autoRoleIds) {

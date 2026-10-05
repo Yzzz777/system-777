@@ -62,11 +62,44 @@ function push(name, key, value) {
 
 function all(name) { return load(name); }
 
+// ── Forma canónica de las entradas de activityLogs ──────────────────────────
+// type/actionType → qué pasó · userId/targetId → quién · executor/target →
+// objetos para la UI · action/details → texto del evento · timestamp → ms.
+// Idempotente: se aplica tanto al escribir como al leer entradas antiguas.
+function normalizeActivityEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const e = { ...entry };
+
+  e.type = (typeof e.type === 'string' && e.type) || e.actionType || 'other';
+  e.actionType = e.actionType || e.type;
+  if (!e.action && typeof e.details === 'string' && e.details) e.action = e.details;
+
+  const SNOWFLAKE = /^\d{17,20}$/;
+  const firstId = (v) => {
+    if (v == null) return null;
+    if (typeof v === 'string') return SNOWFLAKE.test(v) ? v : null;
+    if (typeof v === 'number') return String(v);
+    if (typeof v === 'object' && v.id != null && SNOWFLAKE.test(String(v.id))) return String(v.id);
+    return null;
+  };
+
+  const uid = e.userId ?? firstId(e.executor) ?? firstId(e.user);
+  const tid = e.targetId ?? firstId(e.target);
+  if (uid) e.userId = uid;
+  if (tid) e.targetId = tid;
+  if (!e.executor && uid) e.executor = { id: uid };
+  if (!e.target && tid) e.target = { id: tid };
+
+  return e;
+}
+
 function logActivity(guildId, entry) {
+  const norm = normalizeActivityEntry(entry);
+  if (!norm) return;
   const key = guildId || 'global';
   const db = load('activityLogs');
   const arr = Array.isArray(db[key]) ? db[key] : [];
-  arr.push({ ...entry, timestamp: Date.now() });
+  arr.push({ ...norm, timestamp: Date.now() });
   if (arr.length > 500) arr.splice(0, arr.length - 500);
   db[key] = arr;
   dbFileCache.set('activityLogs', db);
@@ -180,4 +213,4 @@ function flush() {
 // Última línea de defensa: si el proceso muere por exit(), sincronizar.
 process.on('exit', () => { try { flush(); } catch {} });
 
-module.exports = { load, save, get, set, del, push, all, file, logActivity, withLock, query, cleanup, flush };
+module.exports = { load, save, get, set, del, push, all, file, logActivity, normalizeActivityEntry, withLock, query, cleanup, flush };

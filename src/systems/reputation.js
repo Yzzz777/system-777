@@ -4,6 +4,7 @@
  */
 
 const db = require('../utils/db');
+const modLog = require('./modLog');
 
 const BADGES = {
   100: { icon: '👑', label: 'Elite' },
@@ -41,8 +42,8 @@ function calcTrustScore(userId, guildId, user) {
   }
 
   // ── Warns ────────────────────────────────────────────────────────────────
-  const warns = db.get('warns', guildId) || {};
-  const warnCount = (warns[userId] || []).length;
+  const warns = modLog.allWarns(guildId);
+  const warnCount = modLog.countWarns(guildId, userId);
   if      (warnCount === 0) { score += 5;  breakdown.push('+5 sin warns'); }
   else if (warnCount <= 2)  { score -= 5;  breakdown.push(`-5 ${warnCount} warns`); risks.push(`${warnCount} avisos`); }
   else if (warnCount <= 5)  { score -= 15; breakdown.push(`-15 ${warnCount} warns`); risks.push(`${warnCount} avisos (alto)`); }
@@ -84,8 +85,8 @@ function calcServerHealth(guild, guildId) {
   const flags    = db.get('security_flags', guildId) || {};
   const flagged  = Object.keys(flags).length;
   const alts     = (db.get('security_alts', guildId) || []).length;
-  const warns    = db.get('warns', guildId) || {};
-  const warnTotal = Object.values(warns).reduce((a, w) => a + w.length, 0);
+  const warns    = modLog.allWarns(guildId);
+  const warnTotal = Object.values(warns).reduce((a, w) => a + (Array.isArray(w) ? w.length : 0), 0);
 
   let score      = 80;
   const issues   = [];
@@ -109,9 +110,9 @@ function calcServerHealth(guild, guildId) {
  */
 function generateReport(userId, guildId, user) {
   const trust = calcTrustScore(userId, guildId, user);
-  const warns = (db.get('warns', guildId) || {})[userId] || [];
+  const warns = modLog.getWarns(guildId, userId);
   const flags = (db.get('security_flags', guildId) || {})[userId] || { flags: [], score: 0 };
-  const modlogs = (db.get('modlogs', guildId) || {})[userId] || [];
+  const modlogs = modLog.getActions(guildId, userId);
   const ageDays = user ? ((Date.now() - user.createdTimestamp) / (1000 * 60 * 60 * 24)).toFixed(1) : 'N/A';
 
   return {

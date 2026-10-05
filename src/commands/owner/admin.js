@@ -5,6 +5,7 @@ const db         = require('../../utils/db');
 const security   = require('../../systems/securityGuard');
 const reputation = require('../../systems/reputation');
 const staffSys   = require('../../systems/staffSystem');
+const modLog     = require('../../systems/modLog');
 
 module.exports = {
   ownerOnly: true,
@@ -319,8 +320,8 @@ module.exports = {
       const user    = interaction.options.getUser('usuario');
       const guildId = interaction.options.getString('serverid') || interaction.guildId;
 
-      const warns   = db.get('warns', guildId) || {};
-      const modlogs = db.get('modlogs', guildId) || {};
+      const warns   = modLog.allWarns(guildId);
+      const modlogs = modLog.allActions(guildId);
       const economy = db.get('economy', `${guildId}_${user.id}`) || db.get('economy', user.id) || {};
       const levels  = db.get('levels', `${guildId}_${user.id}`) || {};
       const secFlags = security.getUserFlags(user.id, guildId);

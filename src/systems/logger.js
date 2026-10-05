@@ -1,12 +1,61 @@
 const { EmbedBuilder, AuditLogEvent, ChannelType } = require('discord.js');
 const db = require('../utils/db');
+const modLog = require('./modLog');
 
-// Config de canales de log por categoría
+// Config de canales de log por categoría.
+// Prioridad: log_<categoria> (fina, escrita por /logs set)
+//          → log_<bucket>   (agrupación que usa el dashboard: moderation/messages/…)
+//          → logChannel     (genérica)
+const LOG_BUCKETS = {
+  moderation: ['mod', 'ban', 'unban', 'kick', 'warn', 'timeout'],
+  messages:   ['delete', 'edit'],
+  members:    ['join', 'leave', 'nick'],
+  channels:   ['channel_create', 'channel_delete', 'channel_update'],
+  roles:      ['role_add', 'role_remove', 'role_create', 'role_update'],
+  voice:      ['voice_join', 'voice_leave', 'voice_move'],
+};
+const CATEGORY_BUCKET = Object.fromEntries(
+  Object.entries(LOG_BUCKETS).flatMap(([bucket, cats]) => cats.map(c => [c, bucket]))
+);
+
 function getLogChannel(guild, category) {
   const cfg = db.get('guilds', guild.id, {});
-  const chId = cfg[`log_${category}`] ?? cfg.logChannel;
+  const bucket = CATEGORY_BUCKET[category];
+  const chId = cfg[`log_${category}`] ?? (bucket ? cfg[`log_${bucket}`] : undefined) ?? cfg.logChannel;
   if (!chId) return null;
   return guild.channels.cache.get(chId) ?? null;
+}
+
+// Migración única de las dos claves muertas que escribía el dashboard
+// ('logs' y 'logChannels') a las claves reales que lee el bot.
+function migrateLogConfigs() {
+  try {
+    const guilds = db.all('guilds') || {};
+    let migrated = 0;
+    for (const [guildId, cfg] of Object.entries(guilds)) {
+      if (!cfg || typeof cfg !== 'object') continue;
+      let touched = false;
+      for (const src of ['logs', 'logChannels']) {
+        const dead = cfg[src];
+        if (!dead || typeof dead !== 'object') continue;
+        for (const [bucket, channelId] of Object.entries(dead)) {
+          if (!LOG_BUCKETS[bucket] || !channelId || typeof channelId !== 'string') continue;
+          if (!cfg[`log_${bucket}`]) { cfg[`log_${bucket}`] = channelId; touched = true; }
+          for (const cat of LOG_BUCKETS[bucket]) {
+            if (!cfg[`log_${cat}`]) { cfg[`log_${cat}`] = channelId; touched = true; }
+          }
+        }
+        delete cfg[src];
+        touched = true;
+      }
+      if (touched) { db.set('guilds', guildId, cfg); migrated++; }
+    }
+    if (migrated) console.log(`[LOGS] Configuración de canales migrada a log_<bucket> en ${migrated} servidor(es).`);
+    return migrated;
+  } catch (e) {
+    console.error('[LOGS] Error migrando config de logs:', e.message);
+    return 0;
+  }
 }
 
 const COLORS = {
@@ -63,16 +112,24 @@ async function logActivitySafe(guild, entry) {
 }
 
 function saveMod(guildId, entry) {
-  const key  = `mod_${guildId}`;
-  const logs = db.get('modlogs', key, []);
-  logs.unshift(entry);
-  if (logs.length > 500) logs.length = 500;
-  db.set('modlogs', key, logs);
+  modLog.saveAction(guildId, entry);
+}
+
+// Persiste en activityLogs con la forma canónica que consume la web:
+// { type, actionType, action, userId, targetId, executor, target, details }
+function persist(guild, type, entry) {
+  try { db.logActivity(guild.id, { type, ...entry }); } catch {}
 }
 
 // ── MODERACIÓN ─────────────────────────────────────────────────
 async function logBan(guild, user, moderator, reason) {
   saveMod(guild.id, { type:'ban', userId:user.id, mod:moderator?.id, reason, ts:Date.now() });
+  persist(guild, 'moderation', {
+    actionType: 'ban', action: `${user.tag} baneado`,
+    userId: moderator?.id, targetId: user.id,
+    executor: moderator?.id ? { id: moderator.id, tag: moderator.tag } : undefined,
+    target: { id: user.id, tag: user.tag }, details: reason || 'Sin razón',
+  });
   await send(guild, 'ban', new EmbedBuilder()
     .setTitle('🔨 Usuario Baneado')
     .setThumbnail(user.displayAvatarURL?.() ?? null)
@@ -85,6 +142,12 @@ async function logBan(guild, user, moderator, reason) {
 
 async function logUnban(guild, user, moderator) {
   saveMod(guild.id, { type:'unban', userId:user.id, mod:moderator?.id, ts:Date.now() });
+  persist(guild, 'moderation', {
+    actionType: 'unban', action: `${user.tag} desbaneado`,
+    userId: moderator?.id, targetId: user.id,
+    executor: moderator?.id ? { id: moderator.id, tag: moderator.tag } : undefined,
+    target: { id: user.id, tag: user.tag },
+  });
   await send(guild, 'unban', new EmbedBuilder()
     .setTitle('✅ Desban')
     .setThumbnail(user.displayAvatarURL?.() ?? null)
@@ -96,6 +159,12 @@ async function logUnban(guild, user, moderator) {
 
 async function logKick(guild, user, moderator, reason) {
   saveMod(guild.id, { type:'kick', userId:user.id, mod:moderator?.id, reason, ts:Date.now() });
+  persist(guild, 'moderation', {
+    actionType: 'kick', action: `${user.tag} expulsado`,
+    userId: moderator?.id, targetId: user.id,
+    executor: moderator?.id ? { id: moderator.id, tag: moderator.tag } : undefined,
+    target: { id: user.id, tag: user.tag }, details: reason || 'Sin razón',
+  });
   await send(guild, 'kick', new EmbedBuilder()
     .setTitle('👢 Usuario Expulsado')
     .setThumbnail(user.displayAvatarURL?.() ?? null)
@@ -108,7 +177,13 @@ async function logKick(guild, user, moderator, reason) {
 
 async function logWarn(guild, user, moderator, reason) {
   saveMod(guild.id, { type:'warn', userId:user.id, mod:moderator?.id, reason, ts:Date.now() });
-  const total = db.get('warns', `warn_${guild.id}_${user.id}`, []).length;
+  const total = modLog.countWarns(guild.id, user.id);
+  persist(guild, 'moderation', {
+    actionType: 'warn', action: `${user.tag} advertido (${total} warn${total === 1 ? '' : 's'})`,
+    userId: moderator?.id, targetId: user.id,
+    executor: moderator?.id ? { id: moderator.id, tag: moderator.tag } : undefined,
+    target: { id: user.id, tag: user.tag }, details: reason || 'Sin razón',
+  });
   await send(guild, 'warn', new EmbedBuilder()
     .setTitle('⚠️ Advertencia Emitida')
     .setThumbnail(user.displayAvatarURL?.() ?? null)
@@ -122,6 +197,12 @@ async function logWarn(guild, user, moderator, reason) {
 
 async function logTimeout(guild, user, moderator, duration, reason) {
   saveMod(guild.id, { type:'timeout', userId:user.id, mod:moderator?.id, reason, duration, ts:Date.now() });
+  persist(guild, 'moderation', {
+    actionType: 'timeout', action: `${user.tag} en timeout (${duration ?? '?'})`,
+    userId: moderator?.id, targetId: user.id,
+    executor: moderator?.id ? { id: moderator.id, tag: moderator.tag } : undefined,
+    target: { id: user.id, tag: user.tag }, details: reason || 'Sin razón',
+  });
   await send(guild, 'timeout', new EmbedBuilder()
     .setTitle('⏱️ Timeout Aplicado')
     .setThumbnail(user.displayAvatarURL?.() ?? null)
@@ -146,6 +227,13 @@ async function logDelete(guild, message) {
     embed.addFields({ name: '📝 Contenido', value: message.content.slice(0, 1000) });
   if (message.attachments?.size)
     embed.addFields({ name: '📎 Adjuntos', value: [...message.attachments.values()].map(a => a.name).join(', ').slice(0, 500) });
+  persist(guild, 'message', {
+    actionType: 'delete',
+    action: `Mensaje eliminado de ${message.author?.tag ?? '?'} en #${message.channel?.name ?? message.channelId}`,
+    userId: message.author?.id, targetId: message.author?.id,
+    target: message.author?.id ? { id: message.author.id, tag: message.author.tag } : undefined,
+    details: message.content ? message.content.slice(0, 200) : 'Solo adjuntos',
+  });
   await send(guild, 'delete', embed);
 }
 
@@ -160,6 +248,13 @@ async function logEdit(guild, oldMsg, newMsg) {
       { name: '📝 Antes',     value: oldMsg.content.slice(0, 500) || '*vacío*' },
       { name: '✅ Después',   value: newMsg.content.slice(0, 500) || '*vacío*' },
     ));
+  persist(guild, 'message', {
+    actionType: 'edit',
+    action: `Mensaje editado de ${newMsg.author?.tag ?? '?'}`,
+    userId: newMsg.author?.id, targetId: newMsg.author?.id,
+    target: newMsg.author?.id ? { id: newMsg.author.id, tag: newMsg.author.tag } : undefined,
+    details: `${oldMsg.content.slice(0, 90)} → ${newMsg.content.slice(0, 90)}`,
+  });
 }
 
 // ── MIEMBROS ───────────────────────────────────────────────────
@@ -176,6 +271,13 @@ async function logJoin(guild, member) {
       { name: '🗓️ Edad',         value: `${ageDays} días`,                                        inline: true },
       { name: '👥 Miembros ahora', value: `${guild.memberCount}`,                                 inline: true },
     ));
+  persist(guild, 'member', {
+    actionType: 'join',
+    action: `${member.user.tag} se unió al servidor`,
+    userId: member.id, targetId: member.id,
+    target: { id: member.id, tag: member.user.tag },
+    details: parseFloat(ageDays) < 7 ? `Cuenta nueva (${ageDays} días)` : `Cuenta con ${ageDays} días`,
+  });
 }
 
 async function logLeave(guild, member) {
@@ -187,6 +289,13 @@ async function logLeave(guild, member) {
       { name: '⏱️ Estuvo',     value: `<t:${Math.floor(member.joinedTimestamp/1000)}:R>`, inline: true },
       { name: '🎭 Roles',       value: member.roles.cache.filter(r=>r.id!==guild.id).map(r=>r.name).slice(0,8).join(', ') || 'Ninguno', inline: false },
     ));
+  persist(guild, 'member', {
+    actionType: 'leave',
+    action: `${member.user.tag} salió del servidor`,
+    userId: member.id, targetId: member.id,
+    target: { id: member.id, tag: member.user.tag },
+    details: member.roles.cache.filter(r => r.id !== guild.id).map(r => r.name).slice(0, 5).join(', ') || 'Sin roles',
+  });
 }
 
 async function logNick(guild, oldMember, newMember) {
@@ -198,6 +307,13 @@ async function logNick(guild, oldMember, newMember) {
       { name: '⬅️ Antes',   value: oldMember.nickname ?? '*ninguno*',                 inline: true },
       { name: '➡️ Después', value: newMember.nickname ?? '*ninguno*',                 inline: true },
     ));
+  persist(guild, 'member', {
+    actionType: 'nick',
+    action: `Nickname de ${newMember.user.tag} cambiado`,
+    userId: newMember.id, targetId: newMember.id,
+    target: { id: newMember.id, tag: newMember.user.tag },
+    details: `${oldMember.nickname ?? '*ninguno*'} → ${newMember.nickname ?? '*ninguno*'}`,
+  });
 }
 
 async function logRoleChange(guild, oldMember, newMember) {
@@ -213,6 +329,16 @@ async function logRoleChange(guild, oldMember, newMember) {
   if (added.size)   embed.addFields({ name: '➕ Roles añadidos',  value: added.map(r=>r.toString()).join(', '),   inline: true });
   if (removed.size) embed.addFields({ name: '➖ Roles quitados', value: removed.map(r=>r.toString()).join(', '), inline: true });
 
+  persist(guild, 'role', {
+    actionType: added.size ? 'role_add' : 'role_remove',
+    action: `Roles de ${newMember.user.tag} modificados`,
+    userId: newMember.id, targetId: newMember.id,
+    target: { id: newMember.id, tag: newMember.user.tag },
+    details: [
+      ...(added.size ? [`+${added.map(r => r.name).join(', ')}`] : []),
+      ...(removed.size ? [`-${removed.map(r => r.name).join(', ')}`] : []),
+    ],
+  });
   await send(guild, added.size ? 'role_add' : 'role_remove', embed);
 }
 
@@ -221,7 +347,13 @@ async function logVoice(guild, oldState, newState) {
   const user = newState.member?.user ?? oldState.member?.user;
   if (!user) return;
 
+  const voiceEntry = (actionType, action, details) => persist(guild, 'voice', {
+    actionType, action, userId: user.id, targetId: user.id,
+    target: { id: user.id, tag: user.tag }, details,
+  });
+
   if (!oldState.channelId && newState.channelId) {
+    voiceEntry('voice_join', `${user.tag} entró a voz`, `Canal #${newState.channel?.name ?? newState.channelId}`);
     await send(guild, 'voice_join', new EmbedBuilder()
       .setTitle('🔊 Entró a voz')
       .addFields(
@@ -229,6 +361,7 @@ async function logVoice(guild, oldState, newState) {
         { name: '📢 Canal',   value: `<#${newState.channelId}>`, inline: true },
       ));
   } else if (oldState.channelId && !newState.channelId) {
+    voiceEntry('voice_leave', `${user.tag} salió de voz`, `Canal #${oldState.channel?.name ?? oldState.channelId}`);
     await send(guild, 'voice_leave', new EmbedBuilder()
       .setTitle('🔇 Salió de voz')
       .addFields(
@@ -236,6 +369,7 @@ async function logVoice(guild, oldState, newState) {
         { name: '📢 Canal',   value: `<#${oldState.channelId}>`, inline: true },
       ));
   } else if (oldState.channelId !== newState.channelId) {
+    voiceEntry('voice_move', `${user.tag} movido en voz`, `#${oldState.channel?.name ?? oldState.channelId} → #${newState.channel?.name ?? newState.channelId}`);
     await send(guild, 'voice_move', new EmbedBuilder()
       .setTitle('🔀 Movido en voz')
       .addFields(
@@ -255,6 +389,10 @@ async function logChannelCreate(guild, channel) {
       { name: '📁 Tipo',    value: channel.type.toString(), inline: true },
       { name: '🆔 ID',      value: channel.id,          inline: true },
     ));
+  persist(guild, 'channel', {
+    actionType: 'channel_create', action: `Canal #${channel.name} creado`,
+    details: `Tipo ${channel.type} · ID ${channel.id}`,
+  });
 }
 
 async function logChannelDelete(guild, channel) {
@@ -264,9 +402,27 @@ async function logChannelDelete(guild, channel) {
       { name: '📢 Nombre', value: `#${channel.name}`, inline: true },
       { name: '🆔 ID',     value: channel.id,          inline: true },
     ));
+  persist(guild, 'channel', {
+    actionType: 'channel_delete', action: `Canal #${channel.name} eliminado`,
+    details: `ID ${channel.id}`,
+  });
 }
 
 // ── ROLES (create/update) ──────────────────────────────────────
+async function logRoleDelete(guild, role) {
+  await send(guild, 'role_delete', new EmbedBuilder()
+    .setTitle('🗑️ Rol Eliminado')
+    .addFields(
+      { name: '🎭 Rol', value: role.name, inline: true },
+      { name: '🆔 ID',  value: role.id,   inline: true },
+    ));
+  persist(guild, 'role', {
+    actionType: 'role_delete', action: `Rol ${role.name} eliminado`,
+    target: { id: role.id, name: role.name },
+    details: `ID ${role.id}`,
+  });
+}
+
 async function logRoleCreate(guild, role) {
   const entry = await fetchAuditEntry(guild, AuditLogEvent.RoleCreate);
   const executor = entry?.executor;
@@ -415,6 +571,11 @@ async function logFlood(guild, user, channel, count) {
       { name: '📢 Canal',     value: channel.toString(),              inline: true },
       { name: '📨 Mensajes',  value: `${count} en 5s`,               inline: true },
     ));
+  persist(guild, 'moderation', {
+    actionType: 'flood', action: `${user.tag} detectado por flood`,
+    userId: user.id, targetId: user.id, target: { id: user.id, tag: user.tag },
+    details: `${count} mensajes en 5s en ${channel.toString()}`,
+  });
 }
 
 // ── DM AL OWNER ────────────────────────────────────────────────
@@ -431,8 +592,11 @@ async function dmOwner(client, content, embed) {
 }
 
 function getModLogs(guildId, userId = null) {
-  const logs = db.get('modlogs', `mod_${guildId}`, []);
-  return userId ? logs.filter(l => l.userId === userId) : logs;
+  if (userId) return modLog.getActions(guildId, userId);
+  const all = modLog.allActions(guildId);
+  return Object.values(all)
+    .flat()
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0));
 }
 
 module.exports = {
@@ -440,7 +604,7 @@ module.exports = {
   logDelete, logEdit, logJoin, logLeave,
   logNick, logRoleChange, logVoice,
   logChannelCreate, logChannelDelete, logChannelUpdate,
-  logRoleCreate, logRoleUpdate,
+  logRoleCreate, logRoleUpdate, logRoleDelete,
   logWebhookUpdate, logGuildUpdate,
-  logFlood, dmOwner, getModLogs,
+  logFlood, dmOwner, getModLogs, migrateLogConfigs,
 };

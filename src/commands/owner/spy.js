@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const db = require('../../utils/db');
+const modLog = require('../../systems/modLog');
 
 module.exports = {
   ownerOnly: true,
@@ -17,7 +18,7 @@ module.exports = {
     catch { return interaction.editReply({ content: '❌ Usuario no encontrado.' }); }
 
     const eco     = db.get('economy', userId, { coins: 0, bank: 0 });
-    const warns   = db.get('warns', `warn_${interaction.guild?.id}_${userId}`, []);
+    const warns   = modLog.getWarns(interaction.guild?.id, userId);
     const lvlData = db.get('levels', `${interaction.guild?.id}_${userId}`, { level: 0, xp: 0, messages: 0 });
     const gbans   = db.get('globalbans', 'users', {});
     const bl      = db.get('blacklist', 'users', {}) || {};
