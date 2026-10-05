@@ -10,6 +10,17 @@ const sysLogger = require('../src/systems/logger');
 const modLog   = require('../src/systems/modLog');
 const { createCase } = require('../src/commands/moderation/cases');
 
+// ── Helpers de formato ────────────────────────────────────────────────────────
+// process.uptime() devuelve segundos crudos (41234.567) y el panel los pintaba
+// tal cual en la pestaña Analytics.
+function fmtUptime(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return `${d}d ${h}h ${m}m`;
+}
+
 // ── Discord API helpers ───────────────────────────────────────────────────────
 function discordGet(endpoint, token) {
   return new Promise((resolve, reject) => {
@@ -1555,7 +1566,8 @@ module.exports = function startDashboard(client) {
       guilds:       guildsArr,
       premium:      premiumCount,
       totalUsers:   client.guilds.cache.reduce((a, g) => a + g.memberCount, 0),
-      uptime:       process.uptime(),
+      uptime:       fmtUptime(process.uptime()),
+      uptimeSeconds: Math.floor(process.uptime()),
     });
   });
 
