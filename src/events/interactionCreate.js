@@ -374,9 +374,8 @@ module.exports = {
             return interaction.reply({ components: [new ARB().addComponents(select)], flags: MessageFlags.Ephemeral });
           }
           if (id === 'tkt_move') {
-            const db2 = require('../utils/db');
-            const cfg2 = db2.get('ticketConfig', interaction.guild.id, {});
-            const cats = (cfg2.categories || []).map(c => ({ label: c.label, value: c.id, emoji: c.emoji || '📂' }));
+            const cfg2 = await tkt.getConfig(interaction.guild.id) || {};
+            const cats = (cfg2.categories || []).map(c => ({ label: c.label, value: c.categoryId || String(c.id), emoji: c.emoji || '📂' }));
             if (!cats.length) return interaction.reply({ content: '❌ No hay categorías configuradas.', flags: MessageFlags.Ephemeral });
             const { StringSelectMenuBuilder: SSMB, ActionRowBuilder: ARB } = require('discord.js');
             const select = new SSMB().setCustomId('tkt_move_select').setPlaceholder('📂 Mover a categoría...')
@@ -397,19 +396,19 @@ module.exports = {
             const parts = id.split('_');
             const stars = parseInt(parts[2]);
             const chId  = parts.slice(3).join('_');
-            const ticketData = db.get('tickets', chId);
+            const ticketData = await ticketDb.getTicket(chId);
             if (!ticketData) return interaction.reply({ content: '❌ Ticket no encontrado.', flags: MessageFlags.Ephemeral });
             // Show rating modal for comment
             return await tkt.openRatingModal(interaction, stars);
           }
           // Force close without rating
           if (id === 'tkt_force_close') {
-            const ticketData = db.get('tickets', interaction.channel.id);
+            const ticketData = await ticketDb.getTicket(interaction.channel.id);
             if (!ticketData) return interaction.reply({ content: '❌ Ticket no encontrado.', flags: MessageFlags.Ephemeral });
-            if (ticketData.pendingClose) {
-              const cfg = db.get('ticketConfig', interaction.guild.id, {});
+            const pending = ticketData.customFields?.pendingClose;
+            if (pending) {
               await interaction.update({ content: '⏭️ Cerrando ticket sin valoración...', embeds: [], components: [] });
-              return await tkt.closeTicket(interaction, ticketData.pendingClose.reason || 'Cerrado sin valoración');
+              return await tkt.closeTicket(interaction, pending.reason || 'Cerrado sin valoración');
             }
             return await tkt.closeTicket(interaction, 'Cerrado sin valoración');
           }
@@ -496,14 +495,8 @@ module.exports = {
         }
         if (interaction.customId === 'tkt_rating_select') {
           const stars = parseInt(interaction.values[0]);
-          const ticketData = db.get('tickets', interaction.channel.id);
-          if (ticketData) {
-            ticketData.rating = stars;
-            ticketData.ratedAt = Date.now();
-            db.set('tickets', interaction.channel.id, ticketData);
-          }
-          const starsEmoji = '⭐'.repeat(stars);
-          return interaction.update({ content: `${starsEmoji} ¡Gracias por tu valoración!`, components: [] });
+          // Persiste en PostgreSQL + log + aviso al canal de ratings
+          return await tkt.handleRatingFlow(interaction, stars, interaction.channel.id);
         }
         if (interaction.customId === 'tkt_move_select') {
           try {
@@ -537,13 +530,8 @@ module.exports = {
         if (isNaN(stars) || stars < 1 || stars > 5) {
           return interaction.reply({ content: '❌ Ingresa un número del 1 al 5.', flags: MessageFlags.Ephemeral });
         }
-        const ticketData3 = db.get('tickets', interaction.channel.id);
-        if (ticketData3) {
-          ticketData3.rating = stars;
-          ticketData3.ratingComment = comment;
-          ticketData3.ratedAt = Date.now();
-          db.set('tickets', interaction.channel.id, ticketData3);
-        }
+        // Persistencia en PostgreSQL (antes se escribía en JSON y se perdía)
+        await ticketDb.saveRating(interaction.channel.id, stars, comment).catch(() => {});
         const starsEmoji = '⭐'.repeat(stars);
         return interaction.reply({ embeds: [new EmbedBuilder()
           .setColor(0xFEE75C)

@@ -103,6 +103,7 @@ for (const file of eventFiles) {
 logger.info(`${eventFiles.length} eventos registrados.`);
 
 // ── MANEJO DE ERRORES & ANTI-CRASH ───────────────────────────
+let criticalCrashTimes = [];
 process.on('unhandledRejection', (reason, promise) => {
   const msg = reason?.message || reason?.stack || String(reason);
   console.error(`[UNHANDLED] ${msg}`);
@@ -125,7 +126,17 @@ process.on('uncaughtException', (err) => {
     return;
   }
 
-  logger.error('Critical error — continuing (no restart to avoid loops)...');
+  // Error crítico: reiniciar, salvo que se repita en bucle (pm2 ya tiene
+  // max_restarts:10 → si nos pasamos, el bot se quedaría caído para siempre).
+  const now = Date.now();
+  criticalCrashTimes = criticalCrashTimes.filter(t => now - t < 10 * 60 * 1000);
+  if (criticalCrashTimes.length < 3) {
+    criticalCrashTimes.push(now);
+    logger.error('Error crítico — reiniciando en 5s...');
+    setTimeout(() => process.exit(1), 5000);
+  } else {
+    logger.error('Errores críticos repetidos en <10min — continuando para evitar bucle de reinicios');
+  }
 });
 
 // ── SEÑALES DE SISTEMA ────────────────────────────────────────
@@ -148,6 +159,7 @@ async function gracefulShutdown(signal) {
       }
     }
   } catch {}
+  try { require('./utils/db').flush(); } catch {}
   await client.destroy();
   process.exit(0);
 }
@@ -179,10 +191,15 @@ setInterval(() => {
   cleanupShieldMaps(client);
 }, 5 * 60 * 1000);
 
-// Limpieza de datos stale cada hora
+// Limpieza de datos stale cada hora (nulls purgados + expiraciones)
+try { require('./utils/db').cleanup(); } catch (e) { logger.warn(`cleanup inicial: ${e.message}`); }
 setInterval(() => {
-  const db = require('./utils/db');
-  db.cleanup();
+  try {
+    const db = require('./utils/db');
+    db.cleanup();
+  } catch (e) {
+    logger.error(`db.cleanup falló: ${e.message}`);
+  }
 }, 60 * 60 * 1000);
 
 // ── DASHBOARD WEB ─────────────────────────────────────────────

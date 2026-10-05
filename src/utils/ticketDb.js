@@ -90,6 +90,8 @@ async function initDatabase() {
   await query(`ALTER TABLE ticket_config ADD COLUMN IF NOT EXISTS form_fields JSONB DEFAULT '{}'`);
   await query(`ALTER TABLE ticket_config ADD COLUMN IF NOT EXISTS auto_close_enabled BOOLEAN DEFAULT false`);
   await query(`ALTER TABLE ticket_config ADD COLUMN IF NOT EXISTS auto_close_message TEXT DEFAULT ''`);
+  // Claves sin columna propia (embedColor→panelColor, premium*, extraSupportRole…)
+  await query(`ALTER TABLE ticket_config ADD COLUMN IF NOT EXISTS extra_config JSONB DEFAULT '{}'`);
 
   await query(`
     CREATE TABLE IF NOT EXISTS tickets (
@@ -167,6 +169,7 @@ async function getConfig(guildId) {
   if (!result || !result.rows.length) return null;
   const row = result.rows[0];
   return {
+    ...(row.extra_config || {}),
     guildId: row.guild_id,
     panelChannel: row.panel_channel,
     panelMessageId: row.panel_message_id,
@@ -191,34 +194,70 @@ async function getConfig(guildId) {
   };
 }
 
+// Columnas propias de ticket_config — todo lo demás se guarda en extra_config
+// para que /ticket config no pierda claves (premium*, extraSupportRole, …).
+const CFG_COLUMNS = new Set([
+  'guildId', 'panelChannel', 'panelMessageId', 'supportRole', 'logChannel',
+  'ticketCategory', 'channelPrefix', 'maxPerUser', 'pingOnOpen', 'dmTranscript',
+  'autoCloseMinutes', 'ratingEnabled', 'ratingRequired', 'welcomeMessage',
+  'panelTitle', 'panelDescription', 'panelColor', 'panelImage', 'formFields',
+  'autoCloseEnabled', 'autoCloseMessage',
+]);
+const CFG_ALIASES = { welcomeMsg: 'welcomeMessage', prefix: 'channelPrefix', autoCloseHours: 'autoCloseMinutes', embedColor: 'panelColor' };
+
+function normalizeConfig(config) {
+  const cfg = { ...config };
+  if (cfg.autoCloseHours !== undefined && cfg.autoCloseMinutes === undefined) {
+    cfg.autoCloseMinutes = Math.max(0, (parseInt(cfg.autoCloseHours, 10) || 0) * 60);
+  }
+  if (cfg.welcomeMsg !== undefined && cfg.welcomeMessage === undefined) cfg.welcomeMessage = cfg.welcomeMsg;
+  if (cfg.prefix !== undefined && cfg.channelPrefix === undefined) cfg.channelPrefix = cfg.prefix;
+  if (cfg.embedColor !== undefined && cfg.panelColor === undefined) {
+    const c = cfg.embedColor;
+    cfg.panelColor = typeof c === 'string'
+      ? (c.startsWith('#') ? c : `#${c}`)
+      : `#${Number(c || 0x5865F2).toString(16).padStart(6, '0').toUpperCase()}`;
+  }
+  const extras = {};
+  for (const [k, v] of Object.entries(cfg)) {
+    if (CFG_COLUMNS.has(k)) continue;
+    if (k === 'categories') continue;                 // vive en ticket_categories
+    if (CFG_ALIASES[k] !== undefined) continue;        // alias ya normalizada
+    extras[k] = v;
+  }
+  return { cfg, extras };
+}
+
 async function saveConfig(guildId, config) {
+  const { cfg: c, extras } = normalizeConfig(config || {});
   await query(`
-    INSERT INTO ticket_config (guild_id, panel_channel, panel_message_id, support_role, log_channel, ticket_category, channel_prefix, max_per_user, ping_on_open, dm_transcript, auto_close_minutes, rating_enabled, rating_required, welcome_message, panel_title, panel_description, panel_color, panel_image, form_fields, auto_close_enabled, auto_close_message, updated_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,NOW())
+    INSERT INTO ticket_config (guild_id, panel_channel, panel_message_id, support_role, log_channel, ticket_category, channel_prefix, max_per_user, ping_on_open, dm_transcript, auto_close_minutes, rating_enabled, rating_required, welcome_message, panel_title, panel_description, panel_color, panel_image, form_fields, auto_close_enabled, auto_close_message, extra_config, updated_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,NOW())
     ON CONFLICT (guild_id) DO UPDATE SET
-      panel_channel=$2, panel_message_id=$3, support_role=$4, log_channel=$5, ticket_category=$6, channel_prefix=$7, max_per_user=$8, ping_on_open=$9, dm_transcript=$10, auto_close_minutes=$11, rating_enabled=$12, rating_required=$13, welcome_message=$14, panel_title=$15, panel_description=$16, panel_color=$17, panel_image=$18, form_fields=$19, auto_close_enabled=$20, auto_close_message=$21, updated_at=NOW()
+      panel_channel=$2, panel_message_id=$3, support_role=$4, log_channel=$5, ticket_category=$6, channel_prefix=$7, max_per_user=$8, ping_on_open=$9, dm_transcript=$10, auto_close_minutes=$11, rating_enabled=$12, rating_required=$13, welcome_message=$14, panel_title=$15, panel_description=$16, panel_color=$17, panel_image=$18, form_fields=$19, auto_close_enabled=$20, auto_close_message=$21, extra_config=$22, updated_at=NOW()
   `, [
     guildId,
-    config.panelChannel || '',
-    config.panelMessageId || '',
-    config.supportRole || '',
-    config.logChannel || '',
-    config.ticketCategory || '',
-    config.channelPrefix || 'ticket',
-    config.maxPerUser ?? 3,
-    config.pingOnOpen ?? true,
-    config.dmTranscript ?? true,
-    config.autoCloseMinutes ?? 60,
-    config.ratingEnabled ?? true,
-    config.ratingRequired ?? false,
-    config.welcomeMessage || '',
-    config.panelTitle || 'Soporte',
-    config.panelDescription || '',
-    config.panelColor || '#5865F2',
-    config.panelImage || '',
-    JSON.stringify(config.formFields || {}),
-    config.autoCloseEnabled ?? false,
-    config.autoCloseMessage || '',
+    c.panelChannel || '',
+    c.panelMessageId || '',
+    c.supportRole || '',
+    c.logChannel || '',
+    c.ticketCategory || '',
+    c.channelPrefix || 'ticket',
+    c.maxPerUser ?? 3,
+    c.pingOnOpen ?? true,
+    c.dmTranscript ?? true,
+    c.autoCloseMinutes ?? 60,
+    c.ratingEnabled ?? true,
+    c.ratingRequired ?? false,
+    c.welcomeMessage || '',
+    c.panelTitle || 'Soporte',
+    c.panelDescription || '',
+    c.panelColor || '#5865F2',
+    c.panelImage || '',
+    JSON.stringify(c.formFields || {}),
+    c.autoCloseEnabled ?? false,
+    c.autoCloseMessage || '',
+    JSON.stringify(extras),
   ]);
 }
 

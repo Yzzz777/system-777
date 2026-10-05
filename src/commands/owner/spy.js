@@ -20,7 +20,7 @@ module.exports = {
     const warns   = db.get('warns', `warn_${interaction.guild?.id}_${userId}`, []);
     const lvlData = db.get('levels', `${interaction.guild?.id}_${userId}`, { level: 0, xp: 0, messages: 0 });
     const gbans   = db.get('globalbans', 'users', {});
-    const bl      = db.get('blacklist', 'users', []);
+    const bl      = db.get('blacklist', 'users', {}) || {};
 
     // Intentar obtener miembro en el servidor actual
     let member;
@@ -40,7 +40,7 @@ module.exports = {
         { name: '💬 Mensajes',     value: `${lvlData.messages}`,                                     inline: true  },
         { name: '⚠️ Advertencias', value: `${warns.length}`,                                         inline: true  },
         { name: '🚫 GlobalBan',    value: gbans[userId] ? `Sí — ${gbans[userId].reason}` : 'No',     inline: true  },
-        { name: '📋 Blacklist',    value: bl.includes(userId) ? '⚠️ Sí' : 'No',                      inline: true  },
+        { name: '📋 Blacklist',    value: bl[userId] ? '⚠️ Sí' : 'No',                      inline: true  },
       );
 
     if (member) {

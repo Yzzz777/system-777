@@ -30,9 +30,10 @@ const BUTTON_STYLES_MAP = { '1': ButtonStyle.Primary, '2': ButtonStyle.Secondary
 
 async function getConfig(guildId) {
   const pgCfg = await ticketDb.getConfig(guildId);
+  // Las categorías viven SIEMPRE en su tabla (JSON solo como fallback legacy)
+  const tableCategories = await ticketDb.getCategories(guildId);
   if (pgCfg && pgCfg.panelChannel) {
-    const categories = await ticketDb.getCategories(guildId);
-    return { ...pgCfg, categories };
+    return { ...pgCfg, categories: tableCategories };
   }
 
   const oldGuildCfg = db.get('guilds', guildId, {});
@@ -66,7 +67,8 @@ async function getConfig(guildId) {
     return { ...migrated, categories };
   }
 
-  return db.get('ticketConfig', guildId, {});
+  const legacy = db.get('ticketConfig', guildId, {});
+  return { ...legacy, categories: tableCategories.length ? tableCategories : (legacy.categories || []) };
 }
 
 async function saveGuildConfig(guildId, cfg) {
@@ -1393,6 +1395,7 @@ async function renameTicket(interaction) {
 
 module.exports = {
   buildPanel, buildControlPanel, buildTicketEmbed,
+  getConfig, saveGuildConfig,
   openModal, createTicket,
   openCloseModal, closeTicket, reopenTicket,
   claimTicket, setPriority,

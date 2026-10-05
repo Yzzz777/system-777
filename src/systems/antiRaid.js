@@ -55,8 +55,9 @@ async function handleJoin(member, client) {
   const cfg  = getConfig(gid);
 
   // ── 1. BLACKLIST ─────────────────────────────────────────────────────────
-  const bl = db.get('blacklist', 'users', []);
-  if (bl.includes(user.id)) {
+  // Shape canónico: { [userId]: { reason, ts } } — nunca un array.
+  const bl = db.get('blacklist', 'users', {}) || {};
+  if (bl[user.id]) {
     await member.ban({ reason: 'System 777 · Blacklist global' }).catch(() => {});
     return notifyLog(guild, cfg.logChannel, 'blacklist', member);
   }

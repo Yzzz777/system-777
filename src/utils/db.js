@@ -85,59 +85,99 @@ function query(name, filterFn) {
   return Object.entries(data).filter(([k, v]) => filterFn(k, v));
 }
 
+function commit(name, data) {
+  dbFileCache.set(name, data);
+  scheduleWrite(name);
+}
+
+// Elimina entradas null/undefined (y nulls dentro de arrays) — causa raíz
+// del TypeError en cleanup() que rompía la tarea horaria.
+function pruneNulls(data) {
+  let changed = false;
+  for (const k of Object.keys(data)) {
+    const v = data[k];
+    if (v === null || v === undefined) { delete data[k]; changed = true; continue; }
+    if (Array.isArray(v)) {
+      const filtered = v.filter(x => x !== null && x !== undefined);
+      if (filtered.length !== v.length) { data[k] = filtered; changed = true; }
+    }
+  }
+  return changed;
+}
+
 function cleanup() {
   const now = Date.now();
-  const tempbans = load('tempbans');
-  let tempbansChanged = false;
-  for (const [k, v] of Object.entries(tempbans)) {
-    if (v.expiresAt && v.expiresAt < now) {
-      delete tempbans[k];
-      tempbansChanged = true;
-    }
-  }
-  if (tempbansChanged) { dbFileCache.set('tempbans', tempbans); scheduleWrite('tempbans'); }
+  const NS = ['tempbans', 'tickets', 'giveaways', 'activityLogs'];
 
-  const tickets = load('tickets');
-  const thirtyDays = 30 * 24 * 60 * 60 * 1000;
-  let ticketsChanged = false;
-  for (const [k, v] of Object.entries(tickets)) {
-    if (v.status === 'closed' && v.closedAt && (now - v.closedAt > thirtyDays)) {
-      delete tickets[k];
-      ticketsChanged = true;
-    }
+  // 1) primer pase: purgar nulls ANTES de leer propiedades
+  for (const ns of NS) {
+    try {
+      const data = load(ns);
+      if (pruneNulls(data)) commit(ns, data);
+    } catch { /* un namespace roto no detiene a los demás */ }
   }
-  if (ticketsChanged) { dbFileCache.set('tickets', tickets); scheduleWrite('tickets'); }
 
-  const giveaways = load('giveaways');
-  let giveawaysChanged = false;
-  for (const [k, v] of Object.entries(giveaways)) {
-    if (v.endsAt && v.endsAt < now) {
-      delete giveaways[k];
-      giveawaysChanged = true;
-    }
-  }
-  if (giveawaysChanged) { dbFileCache.set('giveaways', giveaways); scheduleWrite('giveaways'); }
-
-  const logs = load('activityLogs');
-  let logsChanged = false;
-  for (const [k, v] of Object.entries(logs)) {
-    if (!Array.isArray(v)) { delete logs[k]; logsChanged = true; continue; }
-    if (v.length > 500) { logs[k] = v.slice(-500); logsChanged = true; }
-    for (let i = logs[k].length - 1; i >= 0; i--) {
-      if (logs[k][i] == null) { logs[k].splice(i, 1); logsChanged = true; }
-    }
-  }
-  if (logsChanged) { dbFileCache.set('activityLogs', logs); scheduleWrite('activityLogs'); }
-
-  const allNames = ['tempbans', 'tickets', 'giveaways', 'activityLogs'];
-  for (const ns of allNames) {
-    const data = load(ns);
+  // 2) expiraciones (con guard: v puede ser primitivo según el contenido)
+  try {
+    const tempbans = load('tempbans');
     let changed = false;
-    for (const [k, v] of Object.entries(data)) {
-      if (v === null || v === undefined) { delete data[k]; changed = true; }
+    for (const [k, v] of Object.entries(tempbans)) {
+      if (v && typeof v === 'object' && v.expiresAt && v.expiresAt < now) {
+        delete tempbans[k];
+        changed = true;
+      }
     }
-    if (changed) { dbFileCache.set(ns, data); scheduleWrite(ns); }
+    if (changed) commit('tempbans', tempbans);
+  } catch {}
+
+  try {
+    const tickets = load('tickets');
+    const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+    let changed = false;
+    for (const [k, v] of Object.entries(tickets)) {
+      if (v && typeof v === 'object' && v.status === 'closed' && v.closedAt && (now - v.closedAt > thirtyDays)) {
+        delete tickets[k];
+        changed = true;
+      }
+    }
+    if (changed) commit('tickets', tickets);
+  } catch {}
+
+  try {
+    const giveaways = load('giveaways');
+    let changed = false;
+    for (const [k, v] of Object.entries(giveaways)) {
+      if (v && typeof v === 'object' && v.endsAt && v.endsAt < now) {
+        delete giveaways[k];
+        changed = true;
+      }
+    }
+    if (changed) commit('giveaways', giveaways);
+  } catch {}
+
+  // 3) recorte de activityLogs a 500 entradas por guild
+  try {
+    const logs = load('activityLogs');
+    let changed = false;
+    for (const [k, v] of Object.entries(logs)) {
+      if (!Array.isArray(v)) { delete logs[k]; changed = true; continue; }
+      if (v.length > 500) { logs[k] = v.slice(-500); changed = true; }
+    }
+    if (changed) commit('activityLogs', logs);
+  } catch {}
+}
+
+// Escribe YA todo lo pendiente (debounce de 100ms) — se llama al apagar
+// para no perder la última ráfaga de escrituras.
+function flush() {
+  for (const [name, timer] of [...pendingWrites]) {
+    clearTimeout(timer);
+    pendingWrites.delete(name);
+    try { save(name, load(name)); } catch {}
   }
 }
 
-module.exports = { load, save, get, set, del, push, all, file, logActivity, withLock, query, cleanup };
+// Última línea de defensa: si el proceso muere por exit(), sincronizar.
+process.on('exit', () => { try { flush(); } catch {} });
+
+module.exports = { load, save, get, set, del, push, all, file, logActivity, withLock, query, cleanup, flush };

@@ -1298,7 +1298,7 @@ module.exports = function startDashboard(client) {
     res.json({
       wlUsers: db.get('whitelist', 'users', []),
       wlBots:  db.get('whitelist', 'bots',  []),
-      bl:      db.get('blacklist', 'users', []),
+      bl:      Object.keys(db.get('blacklist', 'users', {}) || {}),
     });
   });
 

@@ -3,6 +3,7 @@ const {
 } = require('discord.js');
 const db = require('../../utils/db');
 const tkt = require('../../systems/ticketSystem');
+const ticketDb = require('../../utils/ticketDb');
 const { ticketEmbed, successEmbed, infoEmbed, createEmbed } = require('../../utils/embeds');
 
 module.exports = {
@@ -117,7 +118,9 @@ module.exports = {
   async execute(interaction) {
     if (!interaction.guild) return interaction.reply({ content: '❌ Este comando solo funciona en servidores.', flags: MessageFlags.Ephemeral });
     const sub = interaction.options.getSubcommand();
-    const cfg = db.get('ticketConfig', interaction.guild.id, {});
+    // Fuente única: PostgreSQL (con fallback al JSON legacy vía ticketSystem)
+    const cfg = await tkt.getConfig(interaction.guild.id) || {};
+    const saveCfg = () => tkt.saveGuildConfig(interaction.guild.id, cfg);
 
     // ── setup ───────────────────────────────────────────────────────────────
     if (sub === 'setup') {
@@ -135,15 +138,17 @@ module.exports = {
       const desc  = interaction.options.getString('descripcion');
       const catId = interaction.options.getString('categoria-discord');
 
-      if (!cfg.categories) cfg.categories = [];
-      if (cfg.categories.length >= 25) return interaction.reply({ content: '❌ Máximo 25 categorías.', flags: MessageFlags.Ephemeral });
-      if (cfg.categories.find(c => c.id === id)) return interaction.reply({ content: '❌ Ya existe una categoría con ese ID.', flags: MessageFlags.Ephemeral });
+      const existing = await ticketDb.getCategories(interaction.guild.id);
+      if (existing.length >= 25) return interaction.reply({ content: '❌ Máximo 25 categorías.', flags: MessageFlags.Ephemeral });
+      if (existing.find(c => String(c.id) === id || c.categoryId === id)) return interaction.reply({ content: '❌ Ya existe una categoría con ese ID.', flags: MessageFlags.Ephemeral });
 
-      cfg.categories.push({ id, label, emoji, description: desc, channelCategoryId: catId ?? null });
-      db.set('ticketConfig', interaction.guild.id, cfg);
+      await ticketDb.addCategory(interaction.guild.id, {
+        categoryId: id, label, emoji, description: desc,
+        channelCategoryId: catId || '', sortOrder: existing.length,
+      });
 
       // Actualizar panel
-      await updatePanel(interaction.client, interaction.guild, cfg);
+      await updatePanel(interaction.client, interaction.guild, await tkt.getConfig(interaction.guild.id) || {});
 
       return interaction.reply({ content: `✅ Categoría **${label}** agregada al panel.`, flags: MessageFlags.Ephemeral });
     }
@@ -151,18 +156,19 @@ module.exports = {
     // ── remove-categoria ────────────────────────────────────────────────────
     if (sub === 'remove-categoria') {
       const id = interaction.options.getString('id');
-      if (!cfg.categories) return interaction.reply({ content: '❌ Sin categorías configuradas.', flags: MessageFlags.Ephemeral });
-      cfg.categories = cfg.categories.filter(c => c.id !== id);
-      db.set('ticketConfig', interaction.guild.id, cfg);
-      await updatePanel(interaction.client, interaction.guild, cfg);
-      return interaction.reply({ content: `✅ Categoría \`${id}\` eliminada.`, flags: MessageFlags.Ephemeral });
+      const cats = await ticketDb.getCategories(interaction.guild.id);
+      const found = cats.find(c => String(c.id) === id || c.categoryId === id);
+      if (!found) return interaction.reply({ content: '❌ Sin categorías configuradas (o ID inexistente).', flags: MessageFlags.Ephemeral });
+      await ticketDb.deleteCategory(found.id);
+      await updatePanel(interaction.client, interaction.guild, await tkt.getConfig(interaction.guild.id) || {});
+      return interaction.reply({ content: `✅ Categoría \`${found.categoryId}\` eliminada.`, flags: MessageFlags.Ephemeral });
     }
 
     // ── panel ───────────────────────────────────────────────────────────────
     if (sub === 'panel') {
       if (!cfg.panelChannel) return interaction.reply({ content: '❌ Usa `/ticket setup` primero.', flags: MessageFlags.Ephemeral });
       const desc = interaction.options.getString('descripcion');
-      if (desc) { cfg.panelDescription = desc; db.set('ticketConfig', interaction.guild.id, cfg); }
+      if (desc) { cfg.panelDescription = desc; await saveCfg(); }
 
       await updatePanel(interaction.client, interaction.guild, cfg);
       return interaction.reply({ content: '✅ Panel actualizado.', flags: MessageFlags.Ephemeral });
@@ -170,7 +176,7 @@ module.exports = {
 
     // ── add ─────────────────────────────────────────────────────────────────
     if (sub === 'add') {
-      if (!db.get('tickets', interaction.channel.id)) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
+      if (!await ticketDb.getTicket(interaction.channel.id)) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
       const user = interaction.options.getUser('usuario');
       await interaction.channel.permissionOverwrites.edit(user.id, {
         ViewChannel: true, SendMessages: true, ReadMessageHistory: true,
@@ -180,7 +186,7 @@ module.exports = {
 
     // ── remove ──────────────────────────────────────────────────────────────
     if (sub === 'remove') {
-      if (!db.get('tickets', interaction.channel.id)) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
+      if (!await ticketDb.getTicket(interaction.channel.id)) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
       const user = interaction.options.getUser('usuario');
       await interaction.channel.permissionOverwrites.edit(user.id, { ViewChannel: false });
       return interaction.reply({ content: `✅ ${user} removido del ticket.` });
@@ -188,7 +194,7 @@ module.exports = {
 
     // ── rename ──────────────────────────────────────────────────────────────
     if (sub === 'rename') {
-      if (!db.get('tickets', interaction.channel.id)) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
+      if (!await ticketDb.getTicket(interaction.channel.id)) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
       const nombre = interaction.options.getString('nombre').toLowerCase().replace(/[^a-z0-9-]/g, '-');
       await interaction.channel.setName(`ticket-${nombre}`);
       return interaction.reply({ content: `✅ Canal renombrado a \`ticket-${nombre}\`.` });
@@ -196,7 +202,7 @@ module.exports = {
 
     // ── close ───────────────────────────────────────────────────────────────
     if (sub === 'close') {
-      if (!db.get('tickets', interaction.channel.id)) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
+      if (!await ticketDb.getTicket(interaction.channel.id)) return interaction.reply({ content: '❌ Usa dentro de un ticket.', flags: MessageFlags.Ephemeral });
       const razon = interaction.options.getString('razon') ?? 'Cerrado por comando';
       return tkt.closeTicket(interaction, razon);
     }
@@ -223,12 +229,12 @@ module.exports = {
 
     // ── stats ───────────────────────────────────────────────────────────────
     if (sub === 'stats') {
-      const allTickets = db.all('tickets');
-      const guildTkts  = Object.values(allTickets).filter(t => t && t.guildId === interaction.guild.id);
-      const open    = guildTkts.filter(t => t.status === 'open').length;
-      const closed  = guildTkts.filter(t => t.status === 'closed').length;
-      const claimed = guildTkts.filter(t => t.claimedBy).length;
-      const total   = db.get('ticketConfig', `count_${interaction.guild.id}`) ?? 0;
+      const s   = await ticketDb.getStats(interaction.guild.id);
+      const st  = await ticketDb.getStaffStats(interaction.guild.id);
+      const claimed = (st || []).reduce((a, r) => a + Number(r.total || 0), 0);
+      const total   = Number(s.totalTickets) || 0;
+      const open    = Number(s.openTickets) || 0;
+      const closed  = Number(s.closedTickets) || 0;
 
       return interaction.reply({
         embeds: [ticketEmbed('📊 Estadísticas de Tickets', null, {
@@ -237,6 +243,7 @@ module.exports = {
             { name: '🟢 Abiertos',      value: `${open}`,   inline: true },
             { name: '🔴 Cerrados',       value: `${closed}`, inline: true },
             { name: '🟡 Reclamados',     value: `${claimed}`,inline: true },
+            { name: '⭐ Valoración',     value: s.totalRatings > 0 ? `${Number(s.avgRating).toFixed(1)}/5 (${s.totalRatings})` : 'Sin valoraciones', inline: true },
           ]
         })],
         flags: MessageFlags.Ephemeral,
@@ -249,19 +256,19 @@ module.exports = {
       const valor  = interaction.options.getString('valor');
 
       const configMap = {
-        color:       () => { cfg.embedColor = parseInt(valor.replace('#',''), 16) || 0x5865F2; return `🎨 Color: #${valor.replace('#','').toUpperCase()}`; },
+        color:       () => { cfg.panelColor = '#' + valor.replace('#','').toUpperCase(); return `🎨 Color: ${cfg.panelColor}`; },
         ping:        () => { cfg.pingOnOpen = valor === 'true' || valor === '1' || valor === 'on'; return `🔔 Ping al staff: **${cfg.pingOnOpen ? 'activado' : 'desactivado'}**`; },
         max:         () => { cfg.maxPerUser = Math.max(1, parseInt(valor) || 1); return `🔢 Máx tickets por usuario: **${cfg.maxPerUser}**`; },
         dm_transcript:()=>{ cfg.dmTranscript = valor === 'true' || valor === '1' || valor === 'on'; return `📩 DM transcript al cerrar: **${cfg.dmTranscript ? 'activado' : 'desactivado'}**`; },
-        welcome_msg: () => { cfg.welcomeMsg = valor; return `📝 Mensaje bienvenida actualizado`; },
-        auto_close:  () => { cfg.autoCloseHours = Math.max(0, parseInt(valor) || 0); return `⏰ Auto-cierre: **${cfg.autoCloseHours > 0 ? cfg.autoCloseHours + 'h' : 'desactivado'}**`; },
+        welcome_msg: () => { cfg.welcomeMessage = valor; return `📝 Mensaje bienvenida actualizado`; },
+        auto_close:  () => { const h = Math.max(0, parseInt(valor) || 0); cfg.autoCloseMinutes = h * 60; return `⏰ Auto-cierre: **${h > 0 ? h + 'h' : 'desactivado'}**`; },
         extra_role:  () => { cfg.extraSupportRole = valor; return `👥 Rol extra: <@&${valor}>`; },
         prefix:      () => { cfg.channelPrefix = valor.toLowerCase().replace(/[^a-z0-9-]/g,'').slice(0,10) || 'ticket'; return `🏷️ Prefijo: \`${cfg.channelPrefix}\``; },
       };
 
       if (!configMap[opcion]) return interaction.reply({ content: '❌ Opción inválida.', flags: MessageFlags.Ephemeral });
       const msg = configMap[opcion]();
-      db.set('ticketConfig', interaction.guild.id, cfg);
+      await saveCfg();
 
       return interaction.reply({
         embeds: [ticketEmbed('✅ Configuración Actualizada', msg, {
@@ -273,7 +280,11 @@ module.exports = {
 
     // ── disable ─────────────────────────────────────────────────────────────
     if (sub === 'disable') {
+      // Vaciar las TRES fuentes si no, getConfig reviviría el config legacy
       db.set('ticketConfig', interaction.guild.id, {});
+      const g = db.get('guilds', interaction.guild.id, {}) || {};
+      if (g.tickets) { delete g.tickets; db.set('guilds', interaction.guild.id, g); }
+      await tkt.saveGuildConfig(interaction.guild.id, { ...cfg, panelChannel: '', panelMessageId: '' });
       return interaction.reply({ content: '✅ Sistema de tickets desactivado.', flags: MessageFlags.Ephemeral });
     }
 
@@ -284,22 +295,23 @@ module.exports = {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const accion = interaction.options.getString('accion');
       const valor  = interaction.options.getString('valor') || '';
-      const cfg    = db.get('ticketConfig', interaction.guild.id) || {};
+      const cfg    = await tkt.getConfig(interaction.guild.id) || {};
 
       if (accion === 'analytics') {
-        const allTickets = db.all('tickets') || {};
-        const guildTix   = Object.values(allTickets).filter(t => t?.guildId === interaction.guild.id);
-        const open       = guildTix.filter(t => t.status === 'open').length;
-        const closed     = guildTix.filter(t => t.status === 'closed').length;
-        const avgTime    = guildTix.filter(t => t.closedAt && t.openedAt)
-          .reduce((a, t) => a + (t.closedAt - t.openedAt), 0) / (closed || 1);
+        const s  = await ticketDb.getStats(interaction.guild.id);
+        const st = await ticketDb.getStaffStats(interaction.guild.id);
+        const open   = Number(s.openTickets) || 0;
+        const closed = Number(s.closedTickets) || 0;
+        const avgTime = (st || []).length
+          ? (st || []).reduce((a, r) => a + Number(r.avg_rating || 0), 0)
+          : 0;
 
         return interaction.editReply({ embeds: [ticketEmbed('💠 Ticket Analytics Premium', null, {
           fields: [
-            { name: '📂 Total tickets',  value: `${guildTix.length}`, inline: true },
+            { name: '📂 Total tickets',  value: `${Number(s.totalTickets) || 0}`, inline: true },
             { name: '🟢 Abiertos',       value: `${open}`,            inline: true },
             { name: '✅ Cerrados',        value: `${closed}`,          inline: true },
-            { name: '⏱️ Tiempo medio',   value: closed > 0 ? `${Math.floor(avgTime/3600000)}h` : 'N/A', inline: true },
+            { name: '⭐ Valoración media', value: s.totalRatings > 0 ? `${Number(s.avgRating).toFixed(1)}/5` : 'N/A', inline: true },
           ]
         })] });
       }
@@ -307,7 +319,7 @@ module.exports = {
       if (accion === 'branding') {
         if (valor) {
           cfg.premiumBranding = valor;
-          db.set('ticketConfig', interaction.guild.id, cfg);
+          await tkt.saveGuildConfig(interaction.guild.id, cfg);
           return interaction.editReply({ content: `✅ Branding premium actualizado: **${valor}**` });
         }
         return interaction.editReply({ content: `🎨 Branding actual: **${cfg.premiumBranding || 'No configurado'}**\nEspecifica un valor para cambiarlo.` });
@@ -315,13 +327,13 @@ module.exports = {
 
       if (accion === 'autoassign') {
         cfg.premiumAutoAssign = !cfg.premiumAutoAssign;
-        db.set('ticketConfig', interaction.guild.id, cfg);
+        await tkt.saveGuildConfig(interaction.guild.id, cfg);
         return interaction.editReply({ content: `✅ Auto-assign ${cfg.premiumAutoAssign ? '**activado**' : '**desactivado**'}.` });
       }
 
       if (accion === 'priority') {
         cfg.premiumPriority = !cfg.premiumPriority;
-        db.set('ticketConfig', interaction.guild.id, cfg);
+        await tkt.saveGuildConfig(interaction.guild.id, cfg);
         return interaction.editReply({ content: `✅ Prioridad premium en tickets ${cfg.premiumPriority ? '**activada**' : '**desactivada**'}.` });
       }
     }
@@ -329,14 +341,16 @@ module.exports = {
 };
 
 function buildConfigFields(cfg) {
+  const color = cfg.panelColor || cfg.embedColor || '#5865F2';
+  const autoCloseH = cfg.autoCloseMinutes != null ? Math.round(cfg.autoCloseMinutes / 60) : (cfg.autoCloseHours || 0);
   return [
-    { name: '🎨 Color',              value: cfg.embedColor ? `#${cfg.embedColor.toString(16).toUpperCase().padStart(6,'0')}` : '#5865F2', inline: true },
+    { name: '🎨 Color',              value: `${color}`,                                          inline: true },
     { name: '🔔 Ping staff',         value: cfg.pingOnOpen ? '✅ Sí' : '❌ No',                               inline: true },
     { name: '🔢 Máx por usuario',    value: `${cfg.maxPerUser ?? 1}`,                                          inline: true },
     { name: '📩 DM transcript',      value: cfg.dmTranscript ? '✅ Sí' : '❌ No',                              inline: true },
-    { name: '⏰ Auto-cierre',         value: cfg.autoCloseHours ? `${cfg.autoCloseHours}h` : '❌ Off',          inline: true },
+    { name: '⏰ Auto-cierre',         value: autoCloseH ? `${autoCloseH}h` : '❌ Off',          inline: true },
     { name: '🏷️ Prefijo canales',    value: `\`${cfg.channelPrefix ?? 'ticket'}\``,                           inline: true },
-    { name: '📝 Mensaje bienvenida', value: cfg.welcomeMsg ? cfg.welcomeMsg.slice(0,50)+'...' : '*Default*',   inline: false },
+    { name: '📝 Mensaje bienvenida', value: (cfg.welcomeMessage || cfg.welcomeMsg) ? (cfg.welcomeMessage || cfg.welcomeMsg).slice(0,50)+'...' : '*Default*',   inline: false },
   ];
 }
 
@@ -352,6 +366,6 @@ async function updatePanel(client, guild, cfg) {
     }
     const msg = await ch.send(panel);
     cfg.panelMessageId = msg.id;
-    db.set('ticketConfig', guild.id, cfg);
+    await tkt.saveGuildConfig(guild.id, cfg);
   } catch {}
 }
